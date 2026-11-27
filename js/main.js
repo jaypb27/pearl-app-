@@ -78,7 +78,7 @@
           if (info.needsSetup) return P.go('setup', {}, true);
           return P.sync({ force: true, silent: true }).then(function () { P.toast('Connected to ' + ((info.settings || {}).schoolName || 'your school') + ' ✓', 'ok'); P.go('home', {}, true); });
         });
-      }).catch(function (err) { if (old) localStorage.setItem('pearl_api', old); else localStorage.removeItem('pearl_api'); P.busy(b, false); msg.textContent = 'Could not connect: ' + err.message; });
+      }).catch(function (err) { if (old) localStorage.setItem('pearl_api', old); else localStorage.removeItem('pearl_api'); P.busy(b, false); msg.innerHTML = '<b>Could not connect.</b> ' + esc(err.message) + '<br><span class="tiny">Checklist: the link ends in <b>/exec</b> · Deploy → Manage deployments → Who has access: <b>Anyone</b> · deploy a <b>New version</b> after pasting Code.gs.</span>'; });
     };
     P.$('#demo').onclick = function (e) {
       P.busy(e.currentTarget, true, 'Preparing demo');

@@ -4,6 +4,34 @@
 *Reading with purpose, speaking with confidence.*
 Developed by **Joy P. Bacala**, Samal Senior High School
 
+## ⚡ Quick Start (first-time setup, about 30 minutes)
+
+| Step | Where | What to do |
+|---|---|---|
+| 1 | Google Sheets | Create a blank sheet named **PEARL App Database** → **Extensions → Apps Script**. |
+| 2 | Apps Script | Delete the sample code, paste all of **`Code.gs`**, **Save**, run **`initialize`** once and click **Allow**. |
+| 3 | Apps Script | **Deploy → New deployment → Web app**. Execute as **Me**, Who has access **Anyone**, then **Deploy** and copy the **`/exec`** link. |
+| 4 | Browser test | Open the `/exec` link in an **Incognito** window. It must show `{"ok":true,"app":"PEARL App database"…}`. |
+| 5 | GitHub | Upload everything from **PEARL-App-FULL.zip** to your repository, then **Settings → Pages → main / (root) → Save**. |
+| 6 | GitHub | Edit **`config.js`**, paste your `/exec` link between the quotes, and **Commit**. |
+| 7 | PEARL App | Open your site → **Teacher** → the **Welcome** screen → create the coordinator account (keep "Load the 120 PEARL lessons" checked). |
+| 8 | PEARL App | **Settings:** logos, signatories, School Year, teacher accounts and their sections. **Learners:** **Import list**. **Tests:** open the pre-test. |
+| 9 | Learners | Share the app link. Learners open it on Wi-Fi, tap **Install app** and **Update data**, then log in with their LRN and PIN (last 4 digits of the LRN). |
+
+### Updating to a newer version later
+1. Apps Script: paste the new `Code.gs` → **Save** → **Deploy → Manage deployments → ✏️ → Version: New version → Deploy**. The link stays the same.
+2. GitHub: upload the files from **PEARL-App-UPDATE.zip**. It has **no `config.js`**, so your link is never erased.
+3. Close and reopen the app (or press Ctrl + Shift + R).
+
+### If the app says "Database not reachable" or "Offline" while you have internet
+Open your `/exec` link in an **Incognito** window:
+- **Sign-in page or "You need access":** set Who has access to **Anyone** and deploy a **New version**.
+- **"Script function not found":** paste and **Save** `Code.gs`, then deploy a **New version**.
+- **"Authorization is required":** run `initialize` in the editor, click **Allow**, then deploy a **New version**.
+- **"Anyone" isn't in the list:** your DepEd account blocks it. Deploy from a personal Gmail account and update `config.js`.
+
+---
+
 The PEARL App puts the daily 25-minute PEARL routine on learners' phones. It has:
 
 - **Levels:** Beginner, Intermediate and Advanced, each with its own lessons.
@@ -270,4 +298,4 @@ Every school uses **its own copy** of the database:
 
 ---
 
-*PEARL App v1.5.0 · Developed by Joy P. Bacala, Samal Senior High School · For Samal Senior High School and any school implementing the PEARL Program.*
+*PEARL App v1.5.1 · Developed by Joy P. Bacala, Samal Senior High School · For Samal Senior High School and any school implementing the PEARL Program.*

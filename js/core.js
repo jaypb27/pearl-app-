@@ -3,7 +3,7 @@
 (function () {
   'use strict';
   var P = window.P = {};
-  P.VERSION = '1.5.0';
+  P.VERSION = '1.5.1';
   P.views = {};
   P.DEV = 'Joy P. Bacala';
   P.LEVELS = ['Beginner', 'Intermediate', 'Advanced'];
@@ -246,7 +246,7 @@
         if (j && j.auth === false && P.state.session && P.state.session.role === 'teacher') { P.toast('Session expired. Please log in again.', 'bad'); }
         if (!j.ok) { var e = new Error(j.error || 'Request failed'); e.server = true; throw e; }
         return j;
-      }, function (err) { clearTimeout(to); if (err.server) throw err; var e = new Error(err.name === 'AbortError' ? 'The connection timed out.' : 'No internet connection or the server could not be reached.'); e.network = true; throw e; });
+      }, function (err) { clearTimeout(to); if (err.server) throw err; var e = new Error(err.name === 'AbortError' ? 'The connection timed out.' : (navigator.onLine ? 'Cannot reach the PEARL database. Open your Web App link in a browser: it must show {"ok":true…}. In Apps Script, check Deploy → Manage deployments → Who has access: Anyone, then deploy a New version.' : 'No internet connection.')); e.network = true; e.db = navigator.onLine; throw e; });
   };
 
   /* ---------------- data cache ---------------- */
@@ -345,14 +345,14 @@
         return P.pull(opt.force).catch(function (e) { if (e.network) throw e; out.pullError = e; });
       });
     }).then(function () {
-      P.state.online = true; backoff = 5000;
+      P.state.online = true; P.state.dbDown = false; backoff = 5000;
       if (!opt.silent) {
         if (out.flush.failed) P.toast(out.flush.failed + ' item(s) could not upload yet: ' + (out.flush.error && out.flush.error.message), 'bad', 5000);
         else P.toast('All data is synced ✓', 'ok');
       }
       if (out.flush.done) P.emit('uploaded', out.flush);
     }).catch(function (e) {
-      if (e.network) P.state.online = false;
+      if (e.network) { P.state.online = false; P.state.dbDown = !!e.db; }
       if (!opt.silent) P.toast(e.message + (P.state.pending ? ' Your work is saved on this device and will upload later.' : ''), 'bad', 5000);
       backoff = Math.min(backoff * 2, 5 * 60000);
     }).then(function () {
@@ -385,6 +385,7 @@
     if (P.isDemo()) { cls = 'pend'; txt = P.icon('star', 15) + 'Demo'; }
     if (s.syncing) { cls = 'pend'; txt = P.icon('refresh', 15, 'spin') + 'Syncing'; }
     else if (s.pending) { cls = 'pend'; txt = P.icon('upload', 15) + s.pending + ' to upload'; }
+    else if (!s.online && s.dbDown) { cls = 'off'; txt = P.icon('alert', 15) + 'Database not reachable'; }
     else if (!s.online) { cls = 'off'; txt = P.icon('offline', 15) + 'Offline'; }
     return '<button class="sync ' + cls + '" data-sync title="Last sync: ' + P.esc(P.fmtDate(s.lastSync, true)) + '">' + txt + '</button>';
   };
