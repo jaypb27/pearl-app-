@@ -619,7 +619,7 @@
       var used = usedVocab(L, written.join(' '));
       var ac = P.Check.writing(L, written, minW()); delete ac.items;
       var now = new Date().toISOString();
-      var r = { id: st.lrn + '-' + L.id + '-' + P.uid(), level: L.level, day: L.day, lessonId: L.id, title: L.title, score: D.score, total: D.total, quiz: D.answers, written: written, wordCount: P.words(written.join(' ')), vocabUsed: used, autoCheck: ac, audioStatus: D.live && !D.audioSec ? 'live' : 'recorded', audioSec: D.live ? 0 : D.audioSec, reflection: D.reflection, steps: D.stepSec.map(Math.round), leaves: D.leaves || 0, cycle: st.cycle || 0, startedAt: D.startedAt, completedAt: now, device: P.deviceId() };
+      var r = { id: st.lrn + '-' + L.id + '-' + P.uid(), level: L.level, day: L.day, lessonId: L.id, title: L.title, score: D.score, total: D.total, quiz: D.answers, written: written, wordCount: P.words(written.join(' ')), vocabUsed: used, autoCheck: ac, audioStatus: D.live && !D.audioSec ? 'live' : 'recorded', audioSec: D.live ? 0 : D.audioSec, reflection: D.reflection, steps: D.stepSec.map(Math.round), leaves: D.leaves || 0, cycle: st.cycle || 0, syId: S().syId || '', startedAt: D.startedAt, completedAt: now, device: P.deviceId() };
       if (D.live) { r.audioStatus = 'live'; r.audioSec = 0; }
       var before = earned(stats(st, pg), pg);
       pg.lessons[L.id] = { score: r.score, total: r.total, completedAt: now, audioStatus: r.audioStatus, audioSec: r.audioSec, wordCount: r.wordCount, written: written, quiz: D.answers };
@@ -736,7 +736,7 @@
           else manual += pts;
         });
         var now = new Date().toISOString();
-        var r = { id: st.lrn + '-' + A.id + '-' + P.uid(), assessmentId: A.id, title: A.title, type: A.type, level: st.level, answers: D.answers, auto: detail, autoScore: auto, autoTotal: autoTotal, manualPending: manual, completedAt: now, startedAt: D.started, leaves: D.leaves || 0, autoSubmitted: !!byLeaving, device: P.deviceId(), cycle: st.cycle || 0 };
+        var r = { id: st.lrn + '-' + A.id + '-' + P.uid(), assessmentId: A.id, title: A.title, type: A.type, level: st.level, answers: D.answers, auto: detail, autoScore: auto, autoTotal: autoTotal, manualPending: manual, completedAt: now, startedAt: D.started, leaves: D.leaves || 0, autoSubmitted: !!byLeaving, device: P.deviceId(), cycle: st.cycle || 0, syId: S().syId || '' };
         var blobs = items.filter(function (it) { return it.type === 'oral' && D.audio[it.id]; }).map(function (it) { return { key: 'arec:' + st.lrn + ':' + A.id + ':' + it.id, itemId: it.id }; });
         pg.results[A.id] = { autoScore: auto, autoTotal: autoTotal, manualPending: manual, completedAt: now, type: A.type };
         delete pg.drafts['A:' + A.id];

@@ -61,43 +61,50 @@
     getUuid: function () { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) { var r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }); }
   };
 
-  /* ---------- Spreadsheet ---------- */
-  var DB = null;
-  function load() { if (DB) return DB; try { DB = JSON.parse(LS.getItem(PFX + 'sheets') || '{}'); } catch (e) { DB = {}; } return DB; }
-  var saveT = null;
-  function save() { clearTimeout(saveT); saveT = setTimeout(function () { try { LS.setItem(PFX + 'sheets', JSON.stringify(DB)); } catch (e) { console.warn('Demo storage full', e); } }, 50); }
-  function Range(sh, r, c, nr, nc) { this.sh = sh; this.r = r; this.c = c; this.nr = nr; this.nc = nc; }
-  Range.prototype.getValues = function () {
-    var d = load()[this.sh], out = [];
-    for (var i = 0; i < this.nr; i++) { var row = d[this.r - 1 + i] || [], o = []; for (var j = 0; j < this.nc; j++) { var v = row[this.c - 1 + j]; o.push(v === undefined || v === null ? '' : v); } out.push(o); }
-    return out;
-  };
-  Range.prototype.setValues = function (v) {
-    var d = load()[this.sh];
-    for (var i = 0; i < v.length; i++) { var ri = this.r - 1 + i; d[ri] = d[ri] || []; for (var j = 0; j < v[i].length; j++) d[ri][this.c - 1 + j] = v[i][j]; }
-    save(); return this;
-  };
-  Range.prototype.clearContent = function () {
-    var d = load()[this.sh];
-    for (var i = 0; i < this.nr; i++) { var row = d[this.r - 1 + i]; if (row) for (var j = 0; j < this.nc; j++) row[this.c - 1 + j] = ''; }
-    // trim empty trailing rows
-    while (d.length && d[d.length - 1].every(function (x) { return x === '' || x == null; })) d.pop();
-    save(); return this;
-  };
-  Range.prototype.setFontWeight = Range.prototype.setBackground = Range.prototype.setNumberFormat = function () { return this; };
-  function Sheet(name) { this.name = name; }
-  Sheet.prototype.getLastRow = function () { return (load()[this.name] || []).length; };
-  Sheet.prototype.getMaxRows = function () { return Math.max(1000, this.getLastRow()); };
-  Sheet.prototype.getRange = function (r, c, nr, nc) { return new Range(this.name, r, c, nr || 1, nc || 1); };
-  Sheet.prototype.appendRow = function (row) { load()[this.name].push(row.slice()); save(); return this; };
-  Sheet.prototype.setFrozenRows = function () { return this; };
-  var SS = {
-    getSheetByName: function (n) { return load()[n] ? new Sheet(n) : null; },
-    insertSheet: function (n) { load()[n] = []; save(); return new Sheet(n); },
-    getSheets: function () { return Object.keys(load()).map(function (n) { return new Sheet(n); }); },
-    deleteSheet: function (sh) { delete load()[sh.name]; save(); }
-  };
-  G.SpreadsheetApp = { getActiveSpreadsheet: function () { return SS; } };
+  /* ---------- Spreadsheet (active file + archive copies) ---------- */
+  function makeSS(key, id) {
+    var DB = null, saveT = null;
+    function load() { if (DB) return DB; try { DB = JSON.parse(LS.getItem(PFX + key) || '{}'); } catch (e) { DB = {}; } return DB; }
+    function save() { clearTimeout(saveT); saveT = setTimeout(function () { try { LS.setItem(PFX + key, JSON.stringify(DB)); } catch (e) { console.warn('Demo storage full', e); } }, 50); }
+    function Range(sh, r, c, nr, nc) { this.sh = sh; this.r = r; this.c = c; this.nr = nr; this.nc = nc; }
+    Range.prototype.getValues = function () {
+      var d = load()[this.sh], out = [];
+      for (var i = 0; i < this.nr; i++) { var row = d[this.r - 1 + i] || [], o = []; for (var j = 0; j < this.nc; j++) { var v = row[this.c - 1 + j]; o.push(v === undefined || v === null ? '' : v); } out.push(o); }
+      return out;
+    };
+    Range.prototype.setValues = function (v) {
+      var d = load()[this.sh];
+      for (var i = 0; i < v.length; i++) { var ri = this.r - 1 + i; d[ri] = d[ri] || []; for (var j = 0; j < v[i].length; j++) d[ri][this.c - 1 + j] = v[i][j]; }
+      save(); return this;
+    };
+    Range.prototype.clearContent = function () {
+      var d = load()[this.sh];
+      for (var i = 0; i < this.nr; i++) { var row = d[this.r - 1 + i]; if (row) for (var j = 0; j < this.nc; j++) row[this.c - 1 + j] = ''; }
+      while (d.length && d[d.length - 1].every(function (x) { return x === '' || x == null; })) d.pop();
+      save(); return this;
+    };
+    Range.prototype.setFontWeight = Range.prototype.setBackground = Range.prototype.setNumberFormat = function () { return this; };
+    function Sheet(name) { this.name = name; }
+    Sheet.prototype.getLastRow = function () { return (load()[this.name] || []).length; };
+    Sheet.prototype.getMaxRows = function () { return Math.max(1000, this.getLastRow()); };
+    Sheet.prototype.getRange = function (r, c, nr, nc) { return new Range(this.name, r, c, nr || 1, nc || 1); };
+    Sheet.prototype.appendRow = function (row) { load()[this.name].push(row.slice()); save(); return this; };
+    Sheet.prototype.setFrozenRows = function () { return this; };
+    return {
+      getId: function () { return id; }, getUrl: function () { return '#demo-archive-' + id; },
+      getSheetByName: function (n) { return load()[n] ? new Sheet(n) : null; },
+      insertSheet: function (n) { load()[n] = []; save(); return new Sheet(n); },
+      getSheets: function () { return Object.keys(load()).map(function (n) { return new Sheet(n); }); },
+      deleteSheet: function (sh) { delete load()[sh.name]; save(); },
+      copy: function (name) {
+        var nid = 'arch' + Date.now().toString(36); clearTimeout(saveT);
+        try { LS.setItem(PFX + 'ss_' + nid, JSON.stringify(load())); } catch (e) { throw new Error('Demo storage is full; cannot archive.'); }
+        return (REG[nid] = makeSS('ss_' + nid, nid));
+      }
+    };
+  }
+  var ACTIVE = makeSS('sheets', 'active'), REG = {};
+  G.SpreadsheetApp = { getActiveSpreadsheet: function () { return ACTIVE; }, openById: function (id) { if (REG[id]) return REG[id]; if (!LS.getItem(PFX + 'ss_' + id)) throw new Error('Archive not found'); return (REG[id] = makeSS('ss_' + id, id)); } };
 
   G.PropertiesService = { getScriptProperties: function () { return { getProperty: function (k) { return LS.getItem(PFX + 'prop_' + k); }, setProperty: function (k, v) { LS.setItem(PFX + 'prop_' + k, v); } }; } };
   G.LockService = { getScriptLock: function () { return { waitLock: function () { }, releaseLock: function () { } }; } };
@@ -116,9 +123,9 @@
   G.DriveApp = {
     createFolder: function (n) { var f = new Folder('root' + Date.now(), n); FOLDERS[f.id] = f; return f; },
     getFolderById: function (id) { if (!FOLDERS[id]) { FOLDERS[id] = new Folder(id, 'PEARL App Audio Recordings'); } return FOLDERS[id]; },
-    getFileById: function (id) { var b = FILES[id]; if (!b && G.PEARL_DEMO_FILES) b = G.PEARL_DEMO_FILES.getSync(id); if (!b) throw new Error('Audio file not available in demo (recordings are kept only until the page is reloaded).'); return { getBlob: function () { return b; } }; }
+    getFileById: function (id) { if (/^arch/.test(id)) return { moveTo: function () { } }; var b = FILES[id]; if (!b && G.PEARL_DEMO_FILES) b = G.PEARL_DEMO_FILES.getSync(id); if (!b) throw new Error('Audio file not available in demo (recordings are kept only until the page is reloaded).'); return { getBlob: function () { return b; } }; }
   };
   G.ContentService = { MimeType: { JSON: 'json' }, createTextOutput: function (s) { return { s: s, setMimeType: function () { return this; }, getContent: function () { return s; } }; } };
   G.Logger = { log: function () { console.log.apply(console, arguments); } };
-  G.PEARL_DEMO_RESET = function () { Object.keys(LS).forEach(function (k) { if (k.indexOf(PFX) === 0) LS.removeItem(k); }); DB = null; };
+  G.PEARL_DEMO_RESET = function () { Object.keys(LS).forEach(function (k) { if (k.indexOf(PFX) === 0) LS.removeItem(k); }); ACTIVE = makeSS('sheets', 'active'); REG = {}; };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -10,6 +10,7 @@
     '.sheet h4{margin:12px 0 4px;font-size:12.5px;font-family:Georgia,serif}.sig{display:grid;grid-template-columns:repeat(3,1fr);gap:30px;margin-top:36px;font-size:11.5px}.sig .n{margin-top:34px;border-top:1px solid #111;padding-top:3px;font-weight:700;text-transform:uppercase;text-align:center}.sig .t{text-align:center}' +
     '.cB{background:#FDEBDC}.cI{background:#FFF5CC}.cA{background:#DDF5E8}.lgd span{display:inline-block;margin-right:12px}.lgd i{display:inline-block;width:12px;height:12px;vertical-align:middle;margin-right:4px;border:1px solid #999}' +
     '.cards{display:grid;grid-template-columns:1fr 1fr;gap:10px}.lc{border:1.5px dashed #999;border-radius:10px;padding:10px;display:flex;gap:10px;align-items:center;page-break-inside:avoid}.lc img{width:54px;height:54px}.lc b{font-size:13px}.ftr{font-size:9px;color:#666;text-align:center;margin-top:14px}' +
+    '.cert{border:10px double #8E1A58;padding:26px 40px;text-align:center;font-family:Georgia,serif;position:relative;background:radial-gradient(circle at 50% 40%,#fff 0,#fff 55%,#FFF3F8 100%)}.cert .lh{border-bottom:0}.cert h1{font-size:34px;letter-spacing:.12em;color:#8E1A58;margin:10px 0 2px;font-family:Georgia,serif}.cert .sub{letter-spacing:.3em;text-transform:uppercase;font-size:12px;color:#555}.cert .nm{font-size:36px;font-weight:700;margin:18px 0 4px;border-bottom:1.5px solid #333;display:inline-block;padding:0 30px;font-family:Georgia,serif}.cert .aw{font-size:22px;color:#8E1A58;font-weight:700;margin:10px 0}.cert p{font-size:14px;line-height:1.6;max-width:640px;margin:8px auto}.cert .sig{grid-template-columns:1fr 1fr;max-width:620px;margin:40px auto 0}.cert .seal{width:70px;height:70px;border-radius:50%;margin:6px auto 0;background:radial-gradient(circle at 32% 28%,#fff 0,#FBF1F6 22%,#EBCFDF 58%,#C792AF 100%)}' +
     '@media print{body>*:not(.rp-ov){display:none!important}.rp-ov{position:static;background:#fff;overflow:visible}.rp-bar{display:none}.sheet{box-shadow:none;margin:0;max-width:none;padding:0}@page{margin:12mm}}';
   var styled = false;
   function S() { return P.state.settings; }
@@ -157,7 +158,27 @@
       '<table><tr><th>#</th><th>Learner</th><th>Section</th><th>Level</th><th>Score</th><th>%</th><th>Remarks</th></tr>' + o.data.map(function (x, i) { return '<tr><td>' + (i + 1) + '</td><td class="l">' + esc(P.name(x.s)) + '</td><td>' + esc(x.s.section) + '</td><td class="' + lvCls(x.r.level || x.s.level) + '">' + esc(x.r.level || x.s.level) + '</td><td>' + x.rp.score + '/' + x.rp.total + '</td><td>' + x.rp.pct + '%</td><td>' + (x.rp.pendingManual ? 'For checking' : x.passed ? 'Passed' : 'Below passing') + '</td></tr>'; }).join('') + '</table>' + signatures();
   };
 
-  var TITLES = { progress: 'Progress Chart', audio: 'Audio Recording Tracker', sections: 'Completion Summary', watch: 'WATCH Report', improved: 'Most Improved', points: 'Points Summary', literacy: 'Literacy Assessment Summary', releveling: 'Releveling Report', cards: 'Learner Login Cards', testResults: 'Test Results' };
+  R.teachers = function (o) {
+    var r = o.stats, ts = P.sortBy(r.teachers.filter(function (t) { return t.role; }), function (t) { return -(t.checks * 1000 + (t.pct || 0)); });
+    var h = letterhead('Teachers\' Checking Progress Report', 'Period: ' + esc(o.period));
+    h += '<h4>A. Checking progress per teacher</h4><table><tr><th>Rank</th><th>Teacher</th><th>Assigned sections</th><th>Assigned work</th><th>Checked</th><th>%</th><th>Checked by the teacher</th><th>Personal comments</th><th>Median time to check</th><th>Learner completion</th></tr>' +
+      ts.map(function (t, i) { return '<tr><td>' + (i + 1) + '</td><td class="l">' + esc(t.name) + '</td><td class="l">' + esc(t.sections.join(', ')) + '</td><td>' + t.assigned + '</td><td>' + t.assignedChecked + '</td><td>' + (t.pct != null ? t.pct + '%' : '—') + '</td><td>' + t.checks + '</td><td>' + t.comments + '</td><td>' + P.fmtHrs(t.median) + '</td><td>' + (t.engagement != null ? t.engagement + '%' : '—') + '</td></tr>'; }).join('') + '</table>';
+    h += '<h4>B. Checking per section</h4><table><tr><th>Section</th><th>Learners</th><th>Assigned teacher(s)</th><th>Submitted</th><th>Checked</th><th>%</th><th>Waiting</th></tr>' +
+      P.sortBy(r.sections, function (s) { return s.section; }).map(function (s) { return '<tr><td class="l">' + esc(s.section) + '</td><td>' + s.learners + '</td><td class="l">' + esc(s.teachers.join(', ') || 'Unassigned') + '</td><td>' + s.total + '</td><td>' + s.checked + '</td><td>' + (s.pct != null ? s.pct + '%' : '—') + '</td><td>' + s.pending + '</td></tr>'; }).join('') + '</table>';
+    h += '<h4>C. Recognition</h4><table><tr><th>Award</th><th>Awardee(s)</th><th>Basis</th></tr>' + P.AWARDS.map(function (a) { var w = a.pick(ts.filter(function (t) { return t.role; })); return '<tr><td class="l"><b>' + esc(a.title) + '</b></td><td class="l">' + (w.length ? w.map(function (t) { return esc(t.name) + ' (' + esc(a.val(t)) + ')'; }).join('<br>') : '—') + '</td><td class="l">' + esc(a.desc) + '</td></tr>'; }).join('') + '</table>';
+    return h + signatures();
+  };
+  R.certificate = function (o) {
+    var s = S(), t = o.teacher, a = o.award;
+    return '<div class="cert">' + letterhead('', '').replace(/<div class="rt">.*$/s, '') +
+      '<h1>CERTIFICATE OF RECOGNITION</h1><div class="sub">is proudly given to</div><div class="nm">' + esc(String(t.name).toUpperCase()) + '</div>' +
+      '<div class="aw">' + esc(a.title) + '</div><div class="seal"></div>' +
+      '<p>for outstanding dedication in checking and giving feedback on learners\' work (' + esc(o.value) + ') in the <b>' + esc(s.programFull) + ' (' + esc(s.appName) + ')</b> during ' + esc(o.period) + ', helping our learners read with purpose and speak with confidence.</p>' +
+      '<p>Given this ' + esc(new Date().toLocaleDateString('en-PH', { day: 'numeric', month: 'long', year: 'numeric' })) + ' at ' + esc(s.schoolName) + ', ' + esc(s.schoolAddress) + '.</p>' +
+      '<div class="sig"><div><div class="n">' + esc(s.coordinator || '') + '</div><div class="t">' + esc(s.coordinatorTitle) + '</div></div><div><div class="n">' + esc(s.principal || '') + '</div><div class="t">' + esc(s.principalTitle) + '</div></div></div></div>';
+  };
+
+  var TITLES = { progress: 'Progress Chart', audio: 'Audio Recording Tracker', sections: 'Completion Summary', watch: 'WATCH Report', improved: 'Most Improved', points: 'Points Summary', literacy: 'Literacy Assessment Summary', releveling: 'Releveling Report', teachers: 'Teachers\' Checking Progress', certificate: 'Certificate of Recognition', cards: 'Learner Login Cards', testResults: 'Test Results' };
   P.Reports = {
     open: function (type, o) {
       o = o || {};

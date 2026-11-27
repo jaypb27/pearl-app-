@@ -14,11 +14,11 @@
   function filtered() { return visibleStudents().filter(function (s) { return s.active !== false && (!T.f.section || s.section === T.f.section) && (!T.f.level || s.level === T.f.level); }); }
   function toObjs(fields, rows) { return (rows || []).map(function (r) { var o = {}; fields.forEach(function (f, i) { o[f] = r[i]; }); return o; }); }
   P.loadDash = function (force) {
-    var get = T.dash && !force ? Promise.resolve(T.dash) : P.kvGet('dash').then(function (d) { if (d) T.dash = d; return d; });
+    var get = T.dash && !force ? Promise.resolve(T.dash) : P.kvGet('dash:' + user().username + (P.state.viewSy || '')).then(function (d) { if (d) T.dash = d; return d; });
     return get.then(function () {
       return P.api('dashboard', {}, 120000).then(function (res) {
         T.dash = { generated: res.generated, daily: toObjs(res.dailyFields, res.daily), results: toObjs(res.resultFields, res.results), levelHistory: res.levelHistory || [] };
-        P.kvSet('dash', T.dash); return T.dash;
+        P.kvSet('dash:' + user().username + (P.state.viewSy || ''), T.dash); return T.dash;
       }).catch(function (e) { if (!T.dash) T.dash = { daily: [], results: [], levelHistory: [], generated: '' }; if (!e.network) P.toast(e.message, 'bad'); return T.dash; });
     });
   };
@@ -53,23 +53,88 @@
   P.views.teacher = function (params) {
     if (!P.state.session || P.state.session.role !== 'teacher') return P.go('teacherLogin', {}, true);
     if (params && params.tab) T.tab = params.tab;
+    var who = user().username;
+    if (T.user !== who) { T.user = who; T.dash = null; T.tstats = null; T.tab = T.tab || 'dash'; T.f = { section: '', level: '', week: 1, watchDay: 0, imp: 'prepost' }; csel = {}; sel = {}; }
     shell();
     P.loadDash().then(function () { if (P.$('#t-body')) body(); });
   };
-  var TABS = [['dash', 'chart', 'Dashboard'], ['progress', 'calendar', 'Progress Chart'], ['checking', 'check', 'Checking'], ['students', 'users', 'Learners'], ['tests', 'clipboard', 'Tests'], ['materials', 'book', 'Materials'], ['reports', 'printer', 'Reports'], ['security', 'shield', 'Security'], ['settings', 'settings', 'Settings']];
-  var TITLES = { dash: 'Dashboard', progress: 'Progress Chart', checking: 'Checking', students: 'Learners', tests: 'Tests & Assessments', materials: 'Learning Materials', reports: 'Reports', security: 'Security & Devices', settings: 'Settings' };
+  var TABS = [['dash', 'chart', 'Dashboard'], ['progress', 'calendar', 'Progress Chart'], ['checking', 'check', 'Checking'], ['students', 'users', 'Learners'], ['tests', 'clipboard', 'Tests'], ['materials', 'book', 'Materials'], ['reports', 'printer', 'Reports'], ['teachers', 'award', 'Teachers'], ['security', 'shield', 'Security'], ['settings', 'settings', 'Settings']];
+  var TITLES = { dash: 'Dashboard', progress: 'Progress Chart', checking: 'Checking', students: 'Learners', tests: 'Tests & Assessments', materials: 'Learning Materials', reports: 'Reports', security: 'Security & Devices', teachers: 'Teachers & Recognition', settings: 'Settings' };
   function shell() {
     var u = user();
     P.$('#app').innerHTML = P.topbar('<button class="icon-btn" data-refresh title="Refresh data">' + P.icon('refresh', 20) + '</button><button class="icon-btn" data-out title="Log out">' + P.icon('logout', 20) + '</button>') +
-      '<div class="t-shell"><aside class="side"><div class="nav">' + TABS.map(function (t) { return '<button class="tab ' + (T.tab === t[0] ? 'on' : '') + '" data-tab="' + t[0] + '">' + P.icon(t[1], 19) + '<span>' + t[2] + '</span></button>'; }).join('') + '</div>' +
+      '<div class="t-shell"><aside class="side">' + yearPicker() + '<div class="nav">' + TABS.map(function (t) { return '<button class="tab ' + (T.tab === t[0] ? 'on' : '') + '" data-tab="' + t[0] + '">' + P.icon(t[1], 19) + '<span>' + t[2] + '</span></button>'; }).join('') + '</div>' +
       '<div class="who"><b style="color:var(--ink-2)">' + esc(u.name || u.username) + '</b><br>' + (u.role === 'admin' ? 'Program Coordinator' : 'Teacher') + '<br>Sections: ' + esc(u.sections || 'ALL') + '</div></aside>' +
-      '<main class="t-main"><div class="wrap"><div class="page-h"><h2 id="t-title">' + esc(TITLES[T.tab] || '') + '</h2></div><div id="t-body"><div class="empty">Loading…</div></div></div>' + P.credit() + '</main></div>';
+      '<main class="t-main">' + (P.state.viewSy ? '<div class="arch-bar">' + P.icon('book', 18) + '<span class="grow">Viewing <b>SY ' + esc(P.state.settings.schoolYear) + '</b> (archived). You can view, print reports and finish checking, but not change records.</span><button class="btn sm" data-exit-year>Back to current year</button></div>' : '') + '<div class="wrap"><div class="page-h"><h2 id="t-title">' + esc(TITLES[T.tab] || '') + '</h2></div><div id="t-body"><div class="empty">Loading…</div></div></div>' + P.credit() + '</main></div>';
     P.$$('.side [data-tab]').forEach(function (b) { b.onclick = function () { T.tab = b.dataset.tab; P.$$('.side [data-tab]').forEach(function (x) { x.classList.toggle('on', x === b); }); P.$('#t-title').textContent = TITLES[T.tab] || ''; body(); window.scrollTo(0, 0); }; });
-    P.$('[data-out]').onclick = P.logout;
+    P.$('[data-out]').onclick = function () { exitYear(true); P.logout(); };
+    var yp = P.$('[data-year]'); if (yp) yp.onchange = function () { if (yp.value === 'current') exitYear(); else enterYear(yp.value); };
+    var ex = P.$('[data-exit-year]'); if (ex) ex.onclick = function () { exitYear(); };
     P.$('[data-refresh]').onclick = function (e) { var b = e.currentTarget; b.classList.add('spin'); P.sync({ silent: true }).then(function () { return P.loadDash(true); }).then(function () { b.classList.remove('spin'); body(); P.toast('Data refreshed', 'ok'); }); };
   }
+  /* ---------- school years ---------- */
+  function archives() { return ((T.stash ? T.stash.settings : P.state.settings).archives || []).slice().reverse(); }
+  function yearPicker() {
+    var arcs = archives(); if (!arcs.length) return '';
+    var curSy = (T.stash ? T.stash.settings : P.state.settings).schoolYear;
+    return '<div class="year-pick"><label class="f">' + P.icon('calendar', 14) + ' School year</label><select class="in" data-year><option value="current">SY ' + esc(curSy) + ' · current</option>' + arcs.map(function (a) { return '<option value="' + esc(a.id) + '" ' + (P.state.viewSy === a.id ? 'selected' : '') + '>SY ' + esc(a.sy) + ' · archive</option>'; }).join('') + '</select></div>';
+  }
+  function enterYear(id) {
+    var arc = archives().find(function (a) { return a.id === id; }); if (!arc) return;
+    P.toast('Opening SY ' + arc.sy + '…');
+    P.api('pull', { sy: id, have: {} }, 120000).then(function (r) {
+      if (!T.stash) T.stash = { settings: P.state.settings, students: P.state.students, lessons: P.state.lessons, assessments: P.state.assessments, users: P.state.users, dash: T.dash, tstats: T.tstats };
+      var s = P.state;
+      s.settings = Object.assign({}, P.DEFAULT_SETTINGS, r.settings || {}, { schoolYear: arc.sy });
+      s.students = r.students || []; s.lessons = r.lessons || []; s.assessments = r.assessments || []; s.users = r.users || T.stash.users;
+      s.viewSy = id; T.dash = null; T.tstats = null; csel = {}; sel = {};
+      shell(); P.loadDash(true).then(function () { body(); });
+    }).catch(function (e) { P.toast(e.network ? 'Connect to the internet to open a past school year.' : e.message, 'bad'); var yp = P.$('[data-year]'); if (yp) yp.value = P.state.viewSy || 'current'; });
+  }
+  function exitYear(silent) {
+    if (!T.stash) return;
+    var s = P.state, k = T.stash;
+    s.settings = k.settings; s.students = k.students; s.lessons = k.lessons; s.assessments = k.assessments; s.users = k.users; s.viewSy = null;
+    T.dash = k.dash; T.tstats = k.tstats; T.stash = null; csel = {}; sel = {};
+    if (silent) return;
+    shell(); P.loadDash().then(function () { body(); });
+  }
+  P.exitYear = exitYear;
+  function closeYearDialog() {
+    var s = S(), cur = String(s.schoolYear || ''), m0 = cur.match(/(\d{4})\D+(\d{4})/), next = m0 ? (Number(m0[1]) + 1) + '–' + (Number(m0[2]) + 1) : '';
+    var nStud = P.state.students.length, n11 = P.state.students.filter(function (x) { return /^11/.test(String(x.grade)); }).length;
+    var m = P.modal('Start a new school year', '<div class="note info small"><b>What happens:</b><ol style="margin:6px 0 0;padding-left:18px"><li>A complete copy of this year\'s database (learners, daily work, tests, checking, levels, logins, lessons) is saved as <b>“PEARL Archive — SY ' + esc(cur) + '”</b> in your Google Drive. The copy is checked before anything is cleared.</li><li>The new year starts with no submissions. Lessons, tests (closed), teacher accounts and settings stay.</li><li>You can open SY ' + esc(cur) + ' anytime from the <b>School year</b> menu to view, print reports and finish checking. Recordings stay in Drive.</li></ol></div>' +
+      '<div class="field" style="margin-top:12px"><label class="f">Current school year (to be archived)</label><input class="in" value="SY ' + esc(cur) + '" disabled></div>' +
+      '<div class="field"><label class="f">New school year</label><input class="in" id="ny" value="' + esc(next) + '" placeholder="e.g. 2027–2028"></div>' +
+      '<label class="f">Learners for the new year</label>' +
+      '<label class="check" style="margin:6px 0"><input type="radio" name="keep" value="none" checked> Start with an empty list (import the new learners)</label>' +
+      '<label class="check" style="margin:6px 0"><input type="radio" name="keep" value="g11"> Keep the ' + n11 + ' Grade 11 learner(s) as Grade 12 (sections cleared; re-import to set them). Grade 12 learners are removed (graduated).</label>' +
+      '<label class="check" style="margin:6px 0"><input type="radio" name="keep" value="all"> Keep all ' + nStud + ' learners (only their work is cleared)</label>' +
+      '<p class="small muted">Tip: finish checking and print your reports first. You can still do both later from the archive.</p>', { foot: '<button class="btn ghost" data-x>Cancel</button><button class="btn" id="cy">Archive SY ' + esc(cur) + ' and start the new year</button>' });
+    m.querySelector('#cy').onclick = function (e) {
+      var ny = m.querySelector('#ny').value.trim(), keep = (m.querySelector('input[name=keep]:checked') || {}).value || 'none';
+      if (!ny) return P.toast('Type the new school year.');
+      if (ny.replace(/\D/g, '') === cur.replace(/\D/g, '')) return P.toast('The new school year must be different.');
+      P.confirm('Archive <b>SY ' + esc(cur) + '</b> and start <b>SY ' + esc(ny) + '</b>?', 'Yes, start the new year').then(function (ok) {
+        if (!ok) return; P.busy(e.target, true, 'Archiving (this can take a minute)');
+        P.api('closeYear', { newSy: ny, keep: keep }, 300000).then(function (r) { return P.pull(true).then(function () { return r; }); }).then(function (r) {
+          m.close(); T.dash = null; T.tstats = null; P.kvDel('dash:' + user().username);
+          P.modal('Welcome to SY ' + esc(ny) + '!', '<p>SY ' + esc(r.archive.sy) + ' is safely archived: <b>' + r.archive.learners + '</b> learners, <b>' + r.archive.submissions + '</b> daily submissions, <b>' + r.archive.tests + '</b> test results.</p>' + (/^https?:/.test(r.archive.url) ? '<p><a href="' + esc(r.archive.url) + '" target="_blank" rel="noopener">Open the archive in Google Sheets</a></p>' : '') + '<p class="small">' + (r.kept ? r.kept + ' learner(s) were kept. ' : '') + 'Next: import this year\'s learners in <b>Learners</b>, open the pre-test, and set <b>Released up to Day</b>.</p>');
+          shell(); P.loadDash(true).then(function () { body(); });
+        }).catch(function (err) { P.busy(e.target, false); P.toast(err.message, 'bad', 7000); });
+      });
+    };
+  }
+  function yearsCard() {
+    var s = S(), arcs = archives();
+    return '<div class="card" style="margin-top:12px"><div class="row between"><h3 style="margin:0">' + P.icon('calendar', 18) + ' School years</h3>' + (isAdmin() ? '<button class="btn sm" data-newyear>' + P.icon('plus', 16) + ' Start a new school year</button>' : '') + '</div>' +
+      '<p class="small" style="margin-top:8px">Current: <b>SY ' + esc(s.schoolYear) + '</b> · ' + P.state.students.length + ' learners</p>' +
+      (arcs.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>School year</th><th class="c">Learners</th><th class="c">Daily work</th><th class="c">Tests</th><th>Archived</th><th></th></tr></thead><tbody>' + arcs.map(function (a) { return '<tr><td><b>SY ' + esc(a.sy) + '</b></td><td class="c">' + esc(a.learners) + '</td><td class="c">' + esc(a.submissions) + '</td><td class="c">' + esc(a.tests) + '</td><td class="small">' + esc(P.fmtDate(a.closedAt)) + ' · ' + esc(a.by || '') + '</td><td style="white-space:nowrap"><button class="btn xs" data-viewyear="' + esc(a.id) + '">View</button> ' + (/^https?:/.test(a.url) ? '<a class="btn xs ghost" href="' + esc(a.url) + '" target="_blank" rel="noopener">Sheet</a>' : '') + '</td></tr>'; }).join('') + '</tbody></table></div>' : '<p class="small muted">No archived school years yet. At the end of the school year, tap <b>Start a new school year</b>. All of this year\'s records are kept in an archive you can open anytime.</p>') + '</div>';
+  }
+
   function body() {
-    var fn = { dash: tDash, progress: tProgress, checking: tChecking, security: tSecurity, students: tStudents, tests: tTests, materials: tMaterials, reports: tReports, settings: tSettings }[T.tab];
+    if (!T.dash && ['settings', 'teachers', 'security', 'materials'].indexOf(T.tab) < 0) { var el = P.$('#t-body'); if (el) el.innerHTML = '<div class="empty">Loading…</div>'; P.loadDash(true).then(function () { if (T.dash) body(); }); return; }
+    var fn = { dash: tDash, progress: tProgress, checking: tChecking, security: tSecurity, teachers: tTeachers, students: tStudents, tests: tTests, materials: tMaterials, reports: tReports, settings: tSettings }[T.tab];
     try { fn(P.$('#t-body')); } catch (e) { console.error(e); P.$('#t-body').innerHTML = '<div class="card">Error: ' + esc(e.message) + '</div>'; }
   }
   P.tBody = body;
@@ -94,7 +159,7 @@
     var wd = T.f.watchDay || latestDay || 1;
     var h = filterBar();
     h += '<div class="grid g4">' + kpi(st.length, 'Learners') + kpi(P.pct(done, possible) + '%', 'Task completion (Days 1–' + R + ')') + kpi(avgs.length ? Math.round(P.avg(avgs)) + '%' : '—', 'Average quiz score') + kpi(todayN, 'Finished a pearl today') +
-      kpi(P.sum(stats.map(function (o) { return o.x.audio; })), 'Audio recordings') + kpi(P.sum(stats.map(function (o) { return o.x.written; })), 'Written tasks') + kpi((T.dash.daily || []).filter(function (r) { return !r.grade && st.some(function (s) { return s.lrn === r.lrn; }); }).length, 'Waiting to be checked') + '</div>';
+      kpi(P.sum(stats.map(function (o) { return o.x.audio; })), 'Audio recordings') + kpi(P.sum(stats.map(function (o) { return o.x.written; })), 'Written tasks') + kpi((T.dash.daily || []).filter(function (r) { return !r.grade && st.some(function (s) { return s.lrn === r.lrn; }); }).length, 'Waiting to be checked') + (function () { var a = (T.dash.daily || []).filter(function (r) { return st.some(function (s) { return s.lrn === r.lrn; }); }); return kpi(a.length ? Math.round(a.filter(function (r) { return r.grade; }).length / a.length * 100) + '%' : '—', 'Work checked by teachers'); })() + '</div>';
     h += '<div class="card" style="margin-top:12px"><h3>Learners by reading level</h3><div class="lvl-bars">' + P.LEVELS.map(function (l) { var n = (lv[l] || []).length; return n ? '<i style="width:' + P.pct(n, st.length) + '%;background:var(--' + l.slice(0, 3).toLowerCase() + ')" title="' + l + ': ' + n + '"></i>' : ''; }).join('') + '</div>' +
       '<div class="row" style="margin-top:8px">' + P.LEVELS.map(function (l) { var n = (lv[l] || []).length; return '<span class="small"><span class="dot" style="background:var(--' + l.slice(0, 3).toLowerCase() + ')"></span> <b>' + esc(P.alias(l)) + '</b>: ' + n + ' (' + P.pct(n, st.length) + '%)</span>'; }).join('') + '</div></div>';
     // section table
@@ -165,6 +230,57 @@
     P.$('[data-print]', root).onclick = function () { P.Reports.open('progress', { section: T.f.section, level: T.f.level, week: w }); };
   }
 
+  /* ---------------- TEACHERS & RECOGNITION ---------------- */
+  var AWARDS = [
+    { key: 'productive', icon: 'award', title: 'Most Productive Checker', desc: 'Checked the most learners\' work', pick: function (ts) { return top(ts.filter(function (t) { return t.checks > 0; }), function (t) { return t.checks; }); }, val: function (t) { return t.checks + ' checked'; } },
+    { key: 'fastest', icon: 'clock', title: 'Fastest Feedback', desc: 'Shortest time from submission to checking (at least 10 checks)', pick: function (ts) { return top(ts.filter(function (t) { return t.checks >= 10 && t.median != null; }), function (t) { return -t.median; }); }, val: function (t) { return fmtHrs(t.median) + ' median'; } },
+    { key: 'complete', icon: 'check', title: '100% Checker', desc: 'Checked every piece of work in the assigned sections (at least 10)', pick: function (ts) { return ts.filter(function (t) { return t.assigned >= 10 && t.pct === 100; }); }, val: function (t) { return t.assignedChecked + ' of ' + t.assigned; } },
+    { key: 'encouraging', icon: 'pen', title: 'Most Encouraging Teacher', desc: 'Wrote the most personal feedback comments', pick: function (ts) { return top(ts.filter(function (t) { return t.comments > 0; }), function (t) { return t.comments; }); }, val: function (t) { return t.comments + ' comments'; } },
+    { key: 'engaged', icon: 'trending', title: 'Most Engaged Sections', desc: 'Highest learner completion in the assigned sections', pick: function (ts) { return top(ts.filter(function (t) { return t.learners >= 5 && t.engagement != null; }), function (t) { return t.engagement; }); }, val: function (t) { return t.engagement + '% completion'; } }
+  ];
+  var SPLIT_LBL = { shared: 'Shared by all', level: 'Split by level', name: 'Split by learner name', day: 'Split by day (odd/even)' };
+  P.SPLIT_LBL = SPLIT_LBL;
+  function top(arr, fn) { if (!arr.length) return []; var m = Math.max.apply(null, arr.map(fn)); return arr.filter(function (t) { return fn(t) === m; }); }
+  function fmtHrs(h) { return h == null ? '—' : h < 1 ? Math.round(h * 60) + ' min' : h < 48 ? (Math.round(h * 10) / 10) + ' hrs' : Math.round(h / 24) + ' days'; }
+  P.fmtHrs = fmtHrs; P.AWARDS = AWARDS;
+  function pctBar(p) { return p == null ? '<span class="muted small">—</span>' : '<div class="row" style="gap:6px;flex-wrap:nowrap"><div class="bar ' + (p >= 90 ? 'ok' : '') + ' grow"><i style="width:' + p + '%"></i></div><b class="small">' + p + '%</b></div>'; }
+  P.loadTeacherStats = function (days) {
+    return P.api('teacherStats', { days: days }, 120000).then(function (r) { T.tstats = r; P.kvSet('tstats:' + user().username + (P.state.viewSy || ''), r); return r; }).catch(function (e) { return P.kvGet('tstats:' + user().username + (P.state.viewSy || '')).then(function (c) { if (c) { T.tstats = c; return c; } throw e; }); });
+  };
+  function tTeachers(root) {
+    var days = T.f.tDays || 30;
+    root.innerHTML = '<div class="empty">Loading teachers\' checking progress…</div>';
+    P.loadTeacherStats(days).then(function (r) {
+      var ts = r.teachers.filter(function (t) { return t.role; });
+      var period = { 7: 'this week', 30: 'the last 30 days', 90: 'the last 90 days', 365: 'this school year' }[days] || 'the last ' + days + ' days';
+      var me = ts.find(function (t) { return t.username === r.me; });
+      var h = '<div class="row" style="margin-bottom:12px"><select class="in" style="max-width:190px" data-f="tDays">' + [[7, 'This week'], [30, 'Last 30 days'], [90, 'Last 90 days'], [365, 'This school year']].map(function (d) { return '<option value="' + d[0] + '" ' + (d[0] === days ? 'selected' : '') + '>' + d[1] + '</option>'; }).join('') + '</select><span class="grow"></span><button class="btn soft sm" data-trep>' + P.icon('printer', 16) + ' Print report</button></div>';
+      if (me && me.assigned) h += '<div class="card" style="margin-bottom:14px;background:linear-gradient(135deg,#fff 0,#FFF5FA 100%)"><div class="row between"><div><b>Your checking progress</b><div class="small muted">' + esc(me.sections.join(', ')) + ' · ' + period + '</div></div><div style="min-width:220px">' + pctBar(me.pct) + '<div class="tiny muted right">' + me.assignedChecked + ' of ' + me.assigned + ' checked</div></div></div></div>';
+      // awards
+      h += '<h3>' + P.icon('award', 18) + ' Recognition for ' + period + '</h3><div class="grid g3">' + AWARDS.map(function (a) {
+        var w = a.pick(ts);
+        return '<div class="card award"><div class="aw-ic">' + P.icon(a.icon, 26) + '</div><div class="small muted" style="font-weight:700;text-transform:uppercase;letter-spacing:.06em">' + esc(a.title) + '</div>' +
+          (w.length ? w.slice(0, 4).map(function (t) { return '<div class="row between" style="margin-top:8px"><div><b>' + esc(t.name) + '</b><div class="tiny muted">' + esc(a.val(t)) + '</div></div><button class="btn xs soft" data-cert="' + esc(a.key) + '|' + esc(t.username) + '">' + P.icon('printer', 13) + ' Certificate</button></div>'; }).join('') : '<p class="small muted" style="margin:8px 0 0">No awardee yet.</p>') +
+          '<div class="tiny muted" style="margin-top:8px">' + esc(a.desc) + '</div></div>';
+      }).join('') + '</div>';
+      // leaderboard
+      var lb = P.sortBy(ts, function (t) { return -(t.checks * 1000 + (t.pct || 0)); });
+      h += '<h3 style="margin-top:18px">' + P.icon('users', 18) + ' Teachers\' checking progress</h3><div class="tbl-wrap"><table class="tbl"><thead><tr><th>#</th><th>Teacher</th><th>Assigned sections</th><th style="min-width:170px">Assigned work checked</th><th class="c">Checked by them</th><th class="c">Personal comments</th><th class="c">Median time to check</th><th class="c">Learner completion</th><th>Last checking</th></tr></thead><tbody>' +
+        lb.map(function (t, i) { var mine = t.username === r.me; return '<tr' + (mine ? ' style="background:#FFF8E1"' : '') + '><td>' + (t.checks ? '<span class="rank r' + (i + 1) + '">' + (i + 1) + '</span>' : '') + '</td><td><b>' + esc(t.name) + '</b>' + (mine ? ' <span class="chip">you</span>' : '') + '<div class="tiny muted">' + (t.role === 'admin' ? 'Coordinator' : 'Teacher') + '</div></td><td class="small">' + (t.sections.some(function (s) { return /^all$/i.test(s); }) ? '<span class="muted">All (monitor)</span>' : esc(t.sections.join(', ') || '—')) + '</td><td>' + pctBar(t.pct) + (t.assigned ? '<div class="tiny muted">' + t.assignedChecked + ' of ' + t.assigned + '</div>' : '') + '</td><td class="c"><b>' + t.checks + '</b>' + (t.autoAccepted ? '<div class="tiny muted">' + t.autoAccepted + ' quick-accepted</div>' : '') + '</td><td class="c">' + t.comments + '</td><td class="c">' + fmtHrs(t.median) + '</td><td class="c">' + (t.engagement != null ? t.engagement + '%' : '—') + '</td><td class="small">' + esc(t.last ? P.fmtDate(t.last, true) : '—') + '</td></tr>'; }).join('') + '</tbody></table></div>';
+      // assignments by section
+      var secs = P.sortBy(r.sections, function (s) { return s.section; });
+      var unassigned = secs.filter(function (s) { return !s.teachers.length; });
+      h += '<h3 style="margin-top:18px">' + P.icon('clipboard', 18) + ' Checking assignments by section</h3>' + (unassigned.length ? '<div class="note" style="margin-bottom:10px"><b>' + unassigned.length + ' section(s) have no assigned checker:</b> ' + esc(unassigned.map(function (s) { return s.section; }).join(', ')) + '. ' + (isAdmin() ? 'Assign a teacher in <a href="#" data-gou>Settings → Teacher accounts</a>.' : 'Please tell the Program Coordinator.') + '</div>' : '') +
+        '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Section</th><th class="c">Learners</th><th>Assigned teacher(s)</th><th style="min-width:170px">Checked (' + esc(period) + ')</th><th class="c">Waiting</th><th>Oldest unchecked</th></tr></thead><tbody>' +
+        secs.map(function (s) { var late = s.oldest && Date.now() - new Date(s.oldest) > 3 * 864e5; return '<tr><td><b>' + esc(s.section) + '</b></td><td class="c">' + s.learners + '</td><td>' + (s.teachers.length ? esc(s.teachers.join(', ')) + (s.teachers.length > 1 ? '<div class="tiny muted">' + esc(SPLIT_LBL[s.split] || 'Shared') + '</div>' : '') : '<span class="chip warn">Unassigned</span>') + '</td><td>' + pctBar(s.pct) + (s.teachers.length > 1 && s.per && s.per.length ? '<div class="tiny muted">' + s.per.map(function (q) { return esc(q.name) + ': ' + (q.pct != null ? q.pct + '%' : '—') + ' (' + q.checked + '/' + q.total + ')'; }).join(' · ') + '</div>' : '') + '</td><td class="c">' + (s.pending ? '<b>' + s.pending + '</b>' : '0') + '</td><td class="small">' + (s.oldest ? '<span style="color:' + (late ? 'var(--bad)' : 'inherit') + '">' + esc(P.fmtDate(s.oldest)) + (late ? ' (over 3 days)' : '') + '</span>' : '—') + '</td></tr>'; }).join('') + '</tbody></table></div>' +
+        '<p class="tiny muted">A teacher is assigned to the sections listed in their account. Accounts set to ALL (coordinators, ARAL facilitators) monitor all sections and are not counted as assigned checkers. Checks count when a teacher saves feedback, scores a test, or accepts suggestions.</p>';
+      root.innerHTML = h; bindFilters(root);
+      var gu = P.$('[data-gou]', root); if (gu) gu.onclick = function (e) { e.preventDefault(); T.tab = 'settings'; shell(); body(); };
+      P.$('[data-trep]', root).onclick = function () { P.Reports.open('teachers', { stats: r, period: period }); };
+      P.$$('[data-cert]', root).forEach(function (b) { b.onclick = function () { var x = b.dataset.cert.split('|'), a = AWARDS.find(function (z) { return z.key === x[0]; }), tt = ts.find(function (z) { return z.username === x[1]; }); P.Reports.open('certificate', { award: a, teacher: tt, value: a.val(tt), period: period }); }; });
+    }).catch(function (e) { root.innerHTML = '<div class="empty">' + esc(e.network ? 'Connect to the internet to see teachers\' progress.' : e.message) + '</div>'; });
+  }
+
   /* ---------------- SECURITY ---------------- */
   function tSecurity(root) {
     root.innerHTML = '<div class="empty">Loading phone & activity report…</div>';
@@ -196,18 +312,26 @@
     var sm = {}; filtered().forEach(function (s) { sm[s.lrn] = s; });
     var days = {}; (T.dash.daily || []).forEach(function (r) { days[r.day] = 1; });
     var cd = T.f.checkDay || 0;
-    var list = (T.dash.daily || []).filter(function (r) { return sm[r.lrn] && !r.grade && (!cd || Number(r.day) === cd); });
+    var me = user().username, onlyMine = !isAdmin() && T.f.mine !== false;
+    var isMine = function (r) { return P.assignees(sm[r.lrn], r.level, r.day).indexOf(me) >= 0; };
+    var list = (T.dash.daily || []).filter(function (r) { return sm[r.lrn] && !r.grade && (!cd || Number(r.day) === cd) && (!onlyMine || isMine(r)); });
     list = P.sortBy(list, function (r) { var a = parseAuto(r.auto); return (a && a.flags.length ? '0' : '1') + (sm[r.lrn].section || '') + P.name(sm[r.lrn]) + ('00' + r.day).slice(-3); });
-    var tests = (T.dash.results || []).filter(function (r) { return sm[r.lrn] && Number(r.manualPending) > 0 && !r.grade; });
+    var tests = (T.dash.results || []).filter(function (r) { return sm[r.lrn] && Number(r.manualPending) > 0 && !r.grade && (!onlyMine || P.assignees(sm[r.lrn], r.level, 0).indexOf(me) >= 0); });
     var h = filterBar('<select class="in" style="max-width:140px" data-f="checkDay"><option value="0">All days</option>' + Object.keys(days).sort(function (a, b) { return a - b; }).map(function (d) { return '<option value="' + d + '" ' + (Number(d) === cd ? 'selected' : '') + '>Day ' + d + '</option>'; }).join('') + '</select>');
+    var assignedNames = function (r) { return P.assignees(sm[r.lrn], r.level, r.day).map(P.userName); };
+    var allMine = (T.dash.daily || []).filter(function (r) { return sm[r.lrn] && (isAdmin() || isMine(r)); });
+    var chk = allMine.filter(function (r) { return r.grade; }).length;
+    if (!isAdmin()) h += '<div class="seg" style="margin-bottom:12px"><button data-mine="1" class="' + (onlyMine ? 'on' : '') + '">Assigned to me</button><button data-mine="0" class="' + (onlyMine ? '' : 'on') + '">All my sections</button></div>';
+    h += '<div class="card" style="margin-bottom:12px"><div class="row between"><div><b>' + (isAdmin() ? 'All sections' : 'Your assigned work') + ': checking progress</b><div class="small muted">' + chk + ' of ' + allMine.length + ' daily submissions checked' + (tests.length ? ' · ' + tests.length + ' test(s) waiting' : '') + '</div></div><div style="min-width:240px">' + pctBar(allMine.length ? Math.round(chk / allMine.length * 100) : null) + '</div></div></div>';
     h += '<div class="note info small" style="margin-bottom:12px">The quiz is checked automatically. For the written answers, the app suggests a score (content, vocabulary, mechanics) with reasons. <b>Review the flagged ones</b> (copied, short, blank, repeated), then accept the rest in one tap. Learners will see your comment.</div>';
     h += '<div class="row" style="margin-bottom:10px"><h3 style="margin:0">Daily work to check <span class="chip gray">' + list.length + '</span></h3><span class="grow"></span><span class="small muted" id="csc"></span><button class="btn ok sm" id="cacc">✓ Accept suggestions for selected</button></div>';
-    h += list.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th><input type="checkbox" id="call"></th><th>Learner</th><th>Day</th><th class="c">Quiz</th><th class="c">Writing (auto)</th><th>Flags</th><th class="c">Audio</th><th>Finished</th><th></th></tr></thead><tbody>' + list.slice(0, 300).map(function (r) {
+    h += list.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th><input type="checkbox" id="call"></th><th>Learner</th><th class="hide-sm">Assigned to</th><th>Day</th><th class="c">Quiz</th><th class="c">Writing (auto)</th><th>Flags</th><th class="c">Audio</th><th>Finished</th><th></th></tr></thead><tbody>' + list.slice(0, 300).map(function (r) {
       var s = sm[r.lrn], a = parseAuto(r.auto);
-      return '<tr><td><input type="checkbox" data-cs="' + esc(r.id) + '" ' + (csel[r.id] ? 'checked' : '') + '></td><td><span class="name" data-stu="' + esc(r.lrn) + '">' + esc(P.name(s)) + '</span><div class="tiny muted">' + esc(s.section) + '</div></td><td>Day ' + esc(r.day) + ' ' + P.lvChip(r.level) + '</td><td class="c">' + esc(r.score) + '/' + esc(r.total) + '</td><td class="c">' + (a ? '<b>' + a.total + '/' + a.max + '</b>' : '<span class="muted small">open to check</span>') + '</td><td>' + (a ? a.flags.filter(Boolean).map(function (f) { return '<span class="flag">' + esc(f) + '</span>'; }).join('') : '') + '</td><td class="c">' + (r.audioStatus === 'recorded' ? '🎙 ' + P.mmss(r.audioSec) : r.audioStatus === 'live' ? '🗣 live' : '—') + '</td><td class="small">' + esc(P.fmtDate(r.completedAt, true)) + '</td><td><button class="btn xs soft" data-open="' + esc(r.lrn) + '">Open</button></td></tr>';
+      return '<tr><td><input type="checkbox" data-cs="' + esc(r.id) + '" ' + (csel[r.id] ? 'checked' : '') + '></td><td><span class="name" data-stu="' + esc(r.lrn) + '">' + esc(P.name(s)) + '</span><div class="tiny muted">' + esc(s.section) + '</div></td><td class="small hide-sm">' + (function () { var a = assignedNames(r); return a.length ? esc(a.join(', ')) : '<span class="chip warn">Unassigned</span>'; })() + '</td><td>Day ' + esc(r.day) + ' ' + P.lvChip(r.level) + '</td><td class="c">' + esc(r.score) + '/' + esc(r.total) + '</td><td class="c">' + (a ? '<b>' + a.total + '/' + a.max + '</b>' : '<span class="muted small">open to check</span>') + '</td><td>' + (a ? a.flags.filter(Boolean).map(function (f) { return '<span class="flag">' + esc(f) + '</span>'; }).join('') : '') + '</td><td class="c">' + (r.audioStatus === 'recorded' ? '🎙 ' + P.mmss(r.audioSec) : r.audioStatus === 'live' ? '🗣 live' : '—') + '</td><td class="small">' + esc(P.fmtDate(r.completedAt, true)) + '</td><td><button class="btn xs soft" data-open="' + esc(r.lrn) + '">Open</button></td></tr>';
     }).join('') + '</tbody></table></div>' + (list.length > 300 ? '<p class="small muted">Showing the first 300. Use the day filter to see more.</p>' : '') : '<div class="empty"><div class="e">🎉</div>Everything is checked!</div>';
     h += '<h3 style="margin-top:18px">Tests with written/oral items to check <span class="chip gray">' + tests.length + '</span></h3>' + (tests.length ? '<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Learner</th><th>Test</th><th class="c">Auto score</th><th class="c">To check</th><th></th></tr></thead><tbody>' + tests.map(function (r) { var s = sm[r.lrn], A = P.state.assessments.find(function (a) { return a.id === r.assessmentId; }); return '<tr><td>' + esc(P.name(s)) + '<div class="tiny muted">' + esc(s.section) + '</div></td><td>' + esc(A ? A.title : r.assessmentId) + '</td><td class="c">' + esc(r.autoScore) + '/' + esc(r.autoTotal) + '</td><td class="c">' + esc(r.manualPending) + ' pts</td><td><button class="btn xs" data-tchk="' + esc(r.id) + '">Check</button></td></tr>'; }).join('') + '</tbody></table></div>' : '<p class="small muted">None.</p>');
     root.innerHTML = h; bindFilters(root); bindStu(root);
+    P.$$('[data-mine]', root).forEach(function (b) { b.onclick = function () { T.f.mine = b.dataset.mine === '1'; csel = {}; body(); }; });
     var cnt = function () { var n = Object.keys(csel).filter(function (k) { return csel[k]; }).length; var el = P.$('#csc'); if (el) el.textContent = n ? n + ' selected' : ''; return n; };
     cnt();
     var all = P.$('#call', root); if (all) all.onchange = function (e) { list.slice(0, 300).forEach(function (r) { csel[r.id] = e.target.checked; }); P.$$('[data-cs]', root).forEach(function (c) { c.checked = e.target.checked; }); cnt(); };
@@ -667,6 +791,7 @@
 
   /* ---------------- SETTINGS ---------------- */
   function tSettings(root) {
+    if (P.state.viewSy) { root.innerHTML = '<div class="card center"><h3 style="justify-content:center">' + P.icon('book', 18) + ' SY ' + esc(S().schoolYear) + ' is archived</h3><p class="muted">Settings belong to the current school year.</p><button class="btn" data-exit2>Back to current year</button></div>'; P.$('[data-exit2]', root).onclick = function () { exitYear(); }; return; }
     var s = S(), u = user();
     var f = function (k, l, t) { return '<div class="field"><label class="f">' + l + '</label><input class="in" data-s="' + k + '" ' + (t === 'n' ? 'type="number" data-num' : '') + ' value="' + esc(s[k]) + '" ' + (isAdmin() ? '' : 'disabled') + '></div>'; };
     var h = '';
@@ -691,6 +816,8 @@
       h += '<div class="card" style="margin-top:12px"><div class="row between"><h3 style="margin:0">👩‍🏫 Teacher accounts</h3><button class="btn sm" data-nu>＋ Add teacher</button></div><p class="small muted">Teachers see only their sections. Use <b>ALL</b> for ARAL facilitators and coordinators who monitor the whole school.</p><div class="tbl-wrap"><table class="tbl"><tr><th>Username</th><th>Name</th><th>Role</th><th>Sections</th><th></th></tr>' +
         (P.state.users || []).map(function (x) { return '<tr><td>' + esc(x.username) + '</td><td>' + esc(x.name) + '</td><td>' + (x.role === 'admin' ? '<span class="chip">Coordinator</span>' : 'Teacher') + (x.active === false ? ' <span class="chip gray">inactive</span>' : '') + '</td><td class="small">' + esc(x.sections) + '</td><td><button class="btn xs soft" data-eu="' + esc(x.username) + '">Edit</button></td></tr>'; }).join('') + '</table></div></div>';
     }
+    h += yearsCard();
+    if (isAdmin()) h += splitCard();
     h += '<div class="grid g2" style="margin-top:12px"><div class="card"><h3>🔐 My account</h3><p class="small">' + esc(u.name) + ' (' + esc(u.username) + ') · ' + (u.role === 'admin' ? 'Program Coordinator' : 'Teacher') + ' · Sections: ' + esc(u.sections) + '</p><button class="btn soft sm" data-cp>Change my password</button></div>' +
       '<div class="card"><h3>💾 Data & device</h3><p class="small muted">Connected to: ' + esc(P.isDemo() ? 'Demo mode (this device only)' : P.apiUrl().slice(0, 60) + '…') + '<br>Last sync: ' + esc(P.fmtDate(P.state.lastSync, true)) + ' · Waiting to upload: ' + P.state.pending + '</p><div class="row"><button class="btn soft sm" data-bk>⬇ Backup (JSON)</button><button class="btn soft sm" data-share>🔗 Learner link</button><button class="btn ghost sm" data-conn>Change connection</button>' + (P.isDemo() ? '<button class="btn ghost sm" data-resetdemo>Reset demo</button>' : '') + '</div></div></div>';
     root.innerHTML = h;
@@ -711,6 +838,9 @@
       P.busy(e.target, true, 'Saving');
       P.api('saveSettings', { settings: o }).then(function () { return P.pull(); }).then(function () { P.toast('Settings saved ✓', 'ok'); shell(); body(); }).catch(function (err) { P.busy(e.target, false); P.toast(err.message, 'bad'); });
     };
+    bindSplit(root);
+    var nyb = P.$('[data-newyear]', root); if (nyb) nyb.onclick = closeYearDialog;
+    P.$$('[data-viewyear]', root).forEach(function (b) { b.onclick = function () { enterYear(b.dataset.viewyear); }; });
     P.$$('[data-eu]', root).forEach(function (b) { b.onclick = function () { userDialog(P.state.users.find(function (x) { return x.username === b.dataset.eu; })); }; });
     var nu = P.$('[data-nu]', root); if (nu) nu.onclick = function () { userDialog(null); };
     P.$('[data-cp]', root).onclick = changePassword;
@@ -721,6 +851,53 @@
     };
     P.$('[data-bk]', root).onclick = function () { download('pearl-backup-' + P.dayKey() + '.json', JSON.stringify({ exported: new Date().toISOString(), settings: P.state.settings, students: P.state.students.map(function (x) { var c = Object.assign({}, x); delete c.pin; return c; }), lessons: P.state.lessons, assessments: P.state.assessments, dashboard: T.dash }, null, 1)); };
     var rd = P.$('[data-resetdemo]', root); if (rd) rd.onclick = function () { P.confirm('Reset all demo data on this device?', 'Reset', true).then(function (ok) { if (!ok) return; P.Demo.reset(); localStorage.removeItem('pearl_api'); indexedDB.deleteDatabase('pearl-app'); location.reload(); }); };
+  }
+  /* split checking between co-assigned teachers */
+  function letterRanges(n) { var L = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', out = [], per = Math.ceil(26 / n); for (var i = 0; i < n; i++) { var a = L.charAt(i * per), b = L.charAt(Math.min(25, (i + 1) * per - 1)); if (a) out.push(a + '-' + b); } return out; }
+  var splitDraft = null;
+  function splitCard() {
+    var cur = splitDraft || JSON.parse(JSON.stringify(S().checkSplit || {}));
+    splitDraft = cur;
+    var shared = P.sections().filter(function (sec) { return P.sectionTeachers(sec).length > 1; });
+    var h = '<div class="card" style="margin-top:12px"><h3>' + P.icon('users', 18) + ' Splitting the checking (sections with 2+ teachers)</h3><p class="small muted">When two or more teachers are assigned to the same section, choose how to divide the work. Each teacher then gets their own queue and progress %. Anything the split does not cover goes to all of the section\'s teachers.</p>';
+    if (!shared.length) return h + '<p class="small muted">No section has more than one assigned teacher right now. Add the same section to two teacher accounts to split it.</p></div>';
+    shared.forEach(function (sec) {
+      var k = sec.toLowerCase(), tl = P.sectionTeachers(sec), c = cur[k] = cur[k] || { mode: 'shared', map: {}, order: tl.slice() };
+      c.map = c.map || {};
+      var learners = P.state.students.filter(function (s) { return s.section === sec && s.active !== false; });
+      h += '<div class="item-edit" data-sk="' + esc(k) + '"><div class="row between"><b>' + esc(sec) + '</b><span class="small muted">' + tl.map(P.userName).map(esc).join(' · ') + '</span></div>' +
+        '<div class="seg" style="margin:8px 0">' + ['shared', 'level', 'name', 'day'].map(function (m) { return '<button data-mode="' + m + '" class="' + (c.mode === m ? 'on' : '') + '">' + { shared: 'Shared', level: 'By level', name: 'By learner name', day: 'By day' }[m] + '</button>'; }).join('') + '</div>';
+      if (c.mode === 'level') h += '<div class="grid g2">' + tl.map(function (u) { return '<div><b class="small">' + esc(P.userName(u)) + '</b><div class="row">' + P.LEVELS.map(function (l) { return '<label class="check small"><input type="checkbox" data-lv="' + esc(u) + '|' + l + '" ' + ((c.map[u] || []).indexOf(l) >= 0 ? 'checked' : '') + '> ' + l + '</label>'; }).join('') + '</div></div>'; }).join('') + '</div>';
+      if (c.mode === 'name') h += '<div class="grid g2">' + tl.map(function (u) { return '<div><label class="f">' + esc(P.userName(u)) + ' — last names from</label><input class="in" data-rg="' + esc(u) + '" value="' + esc(c.map[u] || '') + '" placeholder="e.g. A-M"></div>'; }).join('') + '</div><button class="btn xs ghost" data-auto style="margin-top:6px">Fill evenly (A–Z)</button>';
+      if (c.mode === 'day') { var order = (c.order || []).filter(function (u) { return tl.indexOf(u) >= 0; }); tl.forEach(function (u) { if (order.indexOf(u) < 0) order.push(u); }); c.order = order;
+        h += '<div class="small">' + order.map(function (u, i) { var ds = []; for (var d = i + 1; d <= Math.min(40, i + 1 + order.length * 4); d += order.length) ds.push(d); return '<div class="row" style="padding:4px 0"><b style="min-width:150px">' + esc(P.userName(u)) + '</b><span class="muted">Days ' + ds.join(', ') + ', …' + (order.length === 2 ? (i === 0 ? ' (odd days)' : ' (even days)') : '') + '</span></div>'; }).join('') + '</div><button class="btn xs ghost" data-rot style="margin-top:6px">' + P.icon('refresh', 13) + ' Rotate order</button><div class="tiny muted" style="margin-top:4px">Tests are shared in this mode (they have no day).</div>'; }
+      // preview
+      var cnt = {}; tl.forEach(function (u) { cnt[u] = 0; });
+      if (c.mode === 'level' || c.mode === 'name') learners.forEach(function (s) { P.pickCheckers(c, tl, s, s.level, 0).forEach(function (u) { cnt[u]++; }); });
+      if (c.mode === 'level' || c.mode === 'name') {
+        var uncovered = learners.filter(function (s) { var r = P.pickCheckers(c, tl, s, s.level, 0); return r.length === tl.length && tl.length > 1 && !(c.mode === 'level' ? tl.every(function (u) { return (c.map[u] || []).indexOf(s.level) >= 0; }) : false); }).length;
+        h += '<div class="tiny muted" style="margin-top:6px">Learners per teacher: ' + tl.map(function (u) { return esc(P.userName(u)) + ' ' + cnt[u]; }).join(' · ') + (uncovered ? ' · <span style="color:var(--warn)">' + uncovered + ' learner(s) not covered (shared by all)</span>' : '') + '</div>';
+      }
+      h += '</div>';
+    });
+    return h + '<div class="row" style="justify-content:flex-end"><button class="btn sm" id="splitsave">Save checking split</button></div></div>';
+  }
+  function bindSplit(root) {
+    var cur = splitDraft; if (!cur) return;
+    var rerender = function () { var el = P.$('#splitsave', root); if (!el) return; var card = el.closest('.card'); var tmp = document.createElement('div'); tmp.innerHTML = splitCard(); card.replaceWith(tmp.firstChild); bindSplit(root); };
+    P.$$('[data-sk]', root).forEach(function (box) {
+      var k = box.dataset.sk, c = cur[k];
+      P.$$('[data-mode]', box).forEach(function (b) { b.onclick = function () { c.mode = b.dataset.mode; if (c.mode === 'name' && !Object.keys(c.map).some(function (u) { return typeof c.map[u] === 'string'; })) { var tl = P.sectionTeachers(k), rg = letterRanges(tl.length); c.map = {}; tl.forEach(function (u, i) { c.map[u] = rg[i]; }); } if (c.mode === 'level' && !Object.keys(c.map).some(function (u) { return Array.isArray(c.map[u]); })) { var tl2 = P.sectionTeachers(k); c.map = {}; tl2.forEach(function (u, i) { c.map[u] = i === 0 ? ['Beginner'] : (i === 1 ? ['Intermediate', 'Advanced'] : []); }); } rerender(); }; });
+      P.$$('[data-lv]', box).forEach(function (x) { x.onchange = function () { var p2 = x.dataset.lv.split('|'), arr = Array.isArray(c.map[p2[0]]) ? c.map[p2[0]] : []; arr = arr.filter(function (l) { return l !== p2[1]; }); if (x.checked) arr.push(p2[1]); c.map[p2[0]] = arr; rerender(); }; });
+      P.$$('[data-rg]', box).forEach(function (x) { x.onchange = function () { c.map[x.dataset.rg] = x.value.toUpperCase().replace(/\s/g, ''); rerender(); }; });
+      var au = P.$('[data-auto]', box); if (au) au.onclick = function () { var tl = P.sectionTeachers(k), rg = letterRanges(tl.length); tl.forEach(function (u, i) { c.map[u] = rg[i]; }); rerender(); };
+      var ro = P.$('[data-rot]', box); if (ro) ro.onclick = function () { c.order.push(c.order.shift()); rerender(); };
+    });
+    var sv = P.$('#splitsave', root);
+    if (sv) sv.onclick = function (e) {
+      P.busy(e.target, true, 'Saving');
+      P.api('saveSettings', { settings: { checkSplit: cur } }).then(function () { return P.pull(); }).then(function () { splitDraft = null; P.toast('Checking split saved ✓', 'ok'); body(); }).catch(function (err) { P.busy(e.target, false); P.toast(err.message, 'bad'); });
+    };
   }
   function logoField(k, label) {
     var s = S();
@@ -744,7 +921,7 @@
     var isNew = !x; x = x || { role: 'teacher', sections: '' };
     var m = P.modal(isNew ? 'Add teacher' : 'Edit teacher', '<div class="field"><label class="f">Username</label><input class="in" id="uu" value="' + esc(x.username || '') + '" ' + (isNew ? '' : 'disabled') + '></div><div class="field"><label class="f">Full name</label><input class="in" id="un" value="' + esc(x.name || '') + '"></div>' +
       '<div class="grid g2"><div class="field"><label class="f">Role</label><select class="in" id="ur"><option value="teacher" ' + (x.role !== 'admin' ? 'selected' : '') + '>Teacher</option><option value="admin" ' + (x.role === 'admin' ? 'selected' : '') + '>Program Coordinator (admin)</option></select></div><div class="field"><label class="f">Sections (comma-separated, or ALL)</label><input class="in" id="us" value="' + esc(x.sections || '') + '" placeholder="e.g. 11-HUMSS A, 12-STEM"></div></div>' +
-      '<p class="tiny muted">Known sections: ' + esc(P.sections().join(', ') || '—') + '</p><div class="field"><label class="f">' + (isNew ? 'Password' : 'New password (leave blank to keep)') + '</label><input class="in" type="password" id="up"></div>' + (isNew ? '' : '<label class="check"><input type="checkbox" id="ua" ' + (x.active !== false ? 'checked' : '') + '> Active</label>'),
+      '<p class="tiny muted">The teacher is the assigned checker for these sections (shown in Checking and Teachers). Known sections: ' + esc(P.sections().join(', ') || '—') + '</p><div class="field"><label class="f">' + (isNew ? 'Password' : 'New password (leave blank to keep)') + '</label><input class="in" type="password" id="up"></div>' + (isNew ? '' : '<label class="check"><input type="checkbox" id="ua" ' + (x.active !== false ? 'checked' : '') + '> Active</label>'),
       { foot: (!isNew ? '<button class="btn ghost" id="udel" style="color:var(--bad);border-color:var(--bad);margin-right:auto">Delete</button>' : '') + '<button class="btn" id="usv">Save</button>' });
     m.querySelector('#usv').onclick = function (e) {
       var un = m.querySelector('#uu').value.trim(), pw = m.querySelector('#up').value;

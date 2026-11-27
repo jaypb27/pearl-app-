@@ -3,7 +3,7 @@
 (function () {
   'use strict';
   var P = window.P = {};
-  P.VERSION = '1.2.0';
+  P.VERSION = '1.5.0';
   P.views = {};
   P.DEV = 'Joy P. Bacala';
   P.LEVELS = ['Beginner', 'Intermediate', 'Advanced'];
@@ -233,6 +233,8 @@
   P.api = function (action, data, timeoutMs) {
     var req = Object.assign({ action: action }, data || {});
     if (P.state.session && P.state.session.token && !req.token) req.token = P.state.session.token;
+    if (P.state.viewSy && req.token && req.sy === undefined && ['login', 'info', 'pull', 'closeYear'].indexOf(action) < 0) req.sy = P.state.viewSy;
+    if (req.sy === null) delete req.sy;
     if (P.isDemo()) return P.Demo.call(req);
     var url = P.apiUrl();
     if (!url) return Promise.reject(new Error('Not connected to a PEARL database yet.'));
@@ -339,6 +341,7 @@
       out.flush = r;
       if (r.error && r.error.network) throw r.error;
       return P.flushEvents().catch(function () { }).then(function () { return P.checkBind(); }).then(function () {
+        if (P.state.viewSy) return; // viewing a past school year: keep its data on screen
         return P.pull(opt.force).catch(function (e) { if (e.network) throw e; out.pullError = e; });
       });
     }).then(function () {
@@ -389,8 +392,40 @@
   document.addEventListener('click', function (e) { if (e.target.closest('[data-sync]')) P.sync({ force: false }); });
 
   /* ---------------- student progress (local) ---------------- */
-  P.getProgress = function (lrn) { return P.kvGet('progress:' + lrn).then(function (p) { p = p || {}; p.lessons = p.lessons || {}; p.results = p.results || {}; p.drafts = p.drafts || {}; p.badges = p.badges || {}; return p; }); };
-  P.setProgress = function (lrn, p) { return P.kvSet('progress:' + lrn, p); };
+  P.pgKey = function (lrn) { var y = P.state.settings.syId; return 'progress:' + (y ? y + ':' : '') + lrn; }; // progress is kept per school year
+  P.getProgress = function (lrn) { return P.kvGet(P.pgKey(lrn)).then(function (p) { p = p || {}; p.lessons = p.lessons || {}; p.results = p.results || {}; p.drafts = p.drafts || {}; p.badges = p.badges || {}; return p; }); };
+  P.setProgress = function (lrn, p) { return P.kvSet(P.pgKey(lrn), p); };
+
+  /* ---------------- checking assignments (same rules as pickCheckers_ in Code.gs) ---------------- */
+  P.sectionTeachers = function (section) {
+    var k = String(section || '').trim().toLowerCase();
+    return (P.state.users || []).filter(function (u) {
+      if (u.active === false) return false;
+      var secs = String(u.sections || '').split(',').map(function (x) { return x.trim().toLowerCase(); });
+      return secs.indexOf('all') < 0 && secs.indexOf(k) >= 0;
+    }).map(function (u) { return u.username; }).sort();
+  };
+  P.pickCheckers = function (cfg, tlist, learner, level, day) {
+    if (!tlist || tlist.length < 2 || !cfg || !cfg.mode || cfg.mode === 'shared') return tlist || [];
+    var map = cfg.map || {}, out = [];
+    if (cfg.mode === 'level') out = tlist.filter(function (u) { return (map[u] || []).indexOf(level) >= 0; });
+    else if (cfg.mode === 'name') {
+      var ch = String(learner && learner.last || '').trim().charAt(0).toUpperCase();
+      out = tlist.filter(function (u) { var rg = String(map[u] || '').toUpperCase().replace(/[^A-Z-]/g, '').split('-'); return rg[0] && ch >= rg[0] && ch <= (rg[1] || rg[0]); });
+    } else if (cfg.mode === 'day') {
+      if (!day) return tlist;
+      var order = (cfg.order || []).filter(function (u) { return tlist.indexOf(u) >= 0; });
+      tlist.forEach(function (u) { if (order.indexOf(u) < 0) order.push(u); });
+      out = [order[(Number(day) - 1) % order.length]];
+    }
+    return out.length ? out : tlist;
+  };
+  P.assignees = function (learner, level, day) {
+    if (!learner) return [];
+    var k = String(learner.section || '').trim().toLowerCase();
+    return P.pickCheckers((P.state.settings.checkSplit || {})[k], P.sectionTeachers(learner.section), learner, level || learner.level, day);
+  };
+  P.userName = function (u) { var x = (P.state.users || []).find(function (y) { return y.username === u; }); return x ? x.name : u; };
 
   /* ---------------- lessons ---------------- */
   P.lessonsFor = function (level) { return P.sortBy(P.state.lessons.filter(function (l) { return l.level === level && (l.kind || 'daily') === 'daily'; }), function (l) { return Number(l.day) || 0; }); };
@@ -430,18 +465,30 @@
     },
     seed: function (salt) {
       var H = function (s) { return sha_(s); };
-      var st = handle_({ action: 'setup', admin: { username: 'demo', name: 'Demo Coordinator', passHash: H(salt + '|demo|demo1234') }, settings: { schoolYear: '2026–2027' } });
+      var st = handle_({ action: 'setup', admin: { username: 'demo', name: 'Demo Coordinator', passHash: H(salt + '|demo|demo1234') }, settings: { schoolYear: '2025–2026' } });
       var T = st.token;
       handle_({ action: 'saveLessons', token: T, lessons: window.PEARL_DEFAULT_LESSONS, replaceAll: true });
       var As = JSON.parse(JSON.stringify(window.PEARL_DEFAULT_ASSESSMENTS)); As[0].open = true; As[2].open = true;
       handle_({ action: 'saveAssessment', token: T, assessments: As });
+      // last school year (archived): a few graduates with their work, so the School year menu has a past year to open
+      var old = ['Ramos', 'Tan', 'Lim', 'Uy', 'Go', 'Sy'].map(function (ln, i) { return { lrn: '1268' + ('00000000' + (52000 + i * 11)).slice(-8), first: ['Paula', 'Ken', 'Mika', 'Jun', 'Ella', 'Rey'][i], last: ln, middle: '', sex: i % 2 ? 'M' : 'F', grade: '12', section: '12-HUMSS', level: ['Beginner', 'Intermediate', 'Advanced'][i % 3] }; });
+      handle_({ action: 'saveStudents', token: T, students: old });
+      var past = new Date(); past.setDate(past.getDate() - 300);
+      old.forEach(function (s, i) {
+        var pin = H(salt + '|' + s.lrn + '|' + s.lrn.slice(-4));
+        for (var d = 1; d <= 8 + i * 4; d++) handle_({ action: 'submitDaily', lrn: s.lrn, pinHash: pin, rec: { id: 'old-' + i + '-' + d, level: s.level, day: d, lessonId: s.level.charAt(0) + '-' + ('0' + d).slice(-2), title: 'Day ' + d, score: 2 + (i + d) % 4, total: 5, written: ['I learned something new today.'], wordCount: 20, audioStatus: 'recorded', audioSec: 60, completedAt: new Date(past.getTime() + d * 864e5).toISOString() } });
+        handle_({ action: 'submitResult', lrn: s.lrn, pinHash: pin, rec: { id: 'oldpre-' + i, assessmentId: 'PRE-SAMPLE', title: 'PEARL Pre-Test (Sample)', type: 'pre', autoScore: 10 + i, autoTotal: 35, manualPending: 0, level: s.level, completedAt: past.toISOString() } });
+      });
+      handle_({ action: 'closeYear', token: T, newSy: '2026–2027', keep: 'none' });
+      handle_({ action: 'saveSettings', token: T, settings: { releasedDay: 40 } });
+      handle_({ action: 'saveAssessment', token: T, assessments: [As[0], As[2]] }); // tests are closed at year start; reopen the samples for the demo
       var firsts = ['Angel', 'Mark', 'Jhon', 'Kyla', 'Bea', 'Carlo', 'Princess', 'Ralph', 'Jasmine', 'Kenneth', 'Mae', 'Joshua', 'Rica', 'Paolo', 'Lovely', 'Jericho', 'Trisha', 'Vince', 'Nicole', 'Aldrin', 'Shaira', 'Ivan', 'Cherry', 'Ronnel', 'Hazel', 'Dexter', 'Grace', 'Jomar', 'Kim', 'Rose'];
       var lasts = ['Abella', 'Bautista', 'Cabahug', 'Dalisay', 'Escaño', 'Flores', 'Gonzaga', 'Hilario', 'Ibañez', 'Jumawan', 'Lumapas', 'Macalisang', 'Navarro', 'Ompad', 'Pacatang', 'Quiñones', 'Rosales', 'Sumalinog', 'Tumulak', 'Ubas', 'Villanueva', 'Yap', 'Zamora', 'Alcantara', 'Borres', 'Cuizon', 'Dumdum', 'Gallardo', 'Lagura', 'Sarmiento'];
       var secs = ['11-HUMSS A', '11-TVL HE', '12-STEM', '12-TVL ICT'], levels = ['Beginner', 'Beginner', 'Beginner', 'Intermediate', 'Intermediate', 'Advanced'];
       var students = firsts.map(function (f, i) { return { lrn: '1278' + ('00000000' + (31000 + i * 37)).slice(-8), first: f, last: lasts[i], middle: '', sex: i % 2 ? 'M' : 'F', grade: secs[i % 4].slice(0, 2), section: secs[i % 4], level: levels[i % 6] }; });
       students.push({ lrn: '123456789012', first: 'Juan', last: 'Dela Cruz', middle: 'Santos', sex: 'M', grade: '11', section: '11-HUMSS A', level: 'Beginner' });
       handle_({ action: 'saveStudents', token: T, students: students });
-      var base = new Date(); base.setHours(7, 30, 0, 0);
+      var base = new Date(), seeded = []; base.setHours(7, 30, 0, 0);
       students.slice(0, 30).forEach(function (s, i) {
         var pin = H(salt + '|' + s.lrn + '|' + s.lrn.slice(-4)), done = 3 + (i * 7) % 6, skill = 0.45 + (i % 5) * 0.11;
         for (var d = 1; d <= done; d++) {
@@ -463,6 +510,7 @@
             ][t];
           });
           var ac = window.PEARL_CHECK ? PEARL_CHECK.writing(L, written, s.level === 'Beginner' ? 8 : s.level === 'Intermediate' ? 15 : 25) : null; if (ac) delete ac.items;
+          seeded.push({ id: 'seed-' + i + '-' + d, section: s.section, score: score, ac: ac });
           handle_({ action: 'submitDaily', lrn: s.lrn, pinHash: pin, rec: { id: 'seed-' + i + '-' + d, level: s.level, day: d, lessonId: lid, title: L.title || 'Day ' + d, score: score, total: 5, quiz: [], written: written, autoCheck: ac, wordCount: written.join(' ').split(/\s+/).length, vocabUsed: ac ? ac.used : [], reflection: { clear: 1 + (i % 3), smooth: 1 + ((i + d) % 3), words: 2 }, audioStatus: (i + d) % 6 ? 'recorded' : 'live', audioSec: 45 + (i * 5) % 50, completedAt: when.toISOString() } });
         }
         if (i < 26) handle_({ action: 'bindDevice', lrn: s.lrn, pinHash: pin, device: 'PH-DEMO' + (100 + i), info: ['Samsung A14', 'Redmi 12C', 'Vivo Y17s', 'OPPO A58', 'realme C55'][i % 5] + ' · Android 13 · Chrome' });
@@ -474,6 +522,16 @@
         handle_({ action: 'submitResult', lrn: s.lrn, pinHash: pin, rec: { id: 'pre-' + i, assessmentId: 'PRE-SAMPLE', title: 'PEARL Pre-Test (Sample)', type: 'pre', autoScore: pre, autoTotal: 35, manualPending: 0, level: s.level, completedAt: new Date(base.getTime() - 20 * 864e5).toISOString() } });
         if (i % 3 !== 0) handle_({ action: 'submitResult', lrn: s.lrn, pinHash: pin, rec: { id: 'post-' + i, assessmentId: 'POST-SAMPLE', title: 'PEARL Post-Test (Sample)', type: 'post', autoScore: post, autoTotal: 35, manualPending: 0, level: s.level, completedAt: new Date().toISOString() } });
       });
+      // demo teachers: assigned sections and some checking already done (Teachers & Recognition)
+      [['msantos', 'Maria Santos', '11-HUMSS A', 0.9, 1], ['jreyes', 'Jose Reyes', '11-TVL HE', 0.55, 0], ['acruz', 'Ana Cruz', '12-STEM', 1, 1]].forEach(function (t) {
+        handle_({ action: 'saveUser', token: T, user: { username: t[0], name: t[1], role: 'teacher', sections: t[2], passHash: H(salt + '|' + t[0] + '|teach1234') } });
+        var tok = handle_({ action: 'login', username: t[0], passHash: H(salt + '|' + t[0] + '|teach1234') }).token;
+        var mine = seeded.filter(function (x) { return x.section === t[2]; }), n = Math.round(mine.length * t[3]);
+        handle_({ action: 'gradeMany', token: tok, items: mine.slice(0, n).map(function (x, k) { return { recId: x.id, kind: 'daily', grade: { writingScore: x.ac ? x.ac.total : 9, writingMax: 12, stars: Math.max(1, x.score), comment: t[4] && k % 2 ? 'Good work! Try to use more of the new words next time.' : (t[4] ? 'Excellent! Your answers are clear and complete.' : ''), auto: !t[4] } }; }) });
+      });
+      // two teachers share 11-HUMSS A: the checking is split by learners' last names
+      handle_({ action: 'saveUser', token: T, user: { username: 'lgarcia', name: 'Liza Garcia', role: 'teacher', sections: '11-HUMSS A', passHash: H(salt + '|lgarcia|teach1234') } });
+      handle_({ action: 'saveSettings', token: T, settings: { checkSplit: { '11-humss a': { mode: 'name', map: { msantos: 'A-M', lgarcia: 'N-Z' }, order: ['lgarcia', 'msantos'] } } } });
       // a learner who tried to log in on a classmate's phone (shows in the Security tab)
       var s26 = students[26], s3 = students[3];
       handle_({ action: 'bindDevice', lrn: s26.lrn, pinHash: H(salt + '|' + s26.lrn + '|' + s26.lrn.slice(-4)), device: 'PH-DEMO103', info: 'OPPO A58 · Android 13 · Chrome' });

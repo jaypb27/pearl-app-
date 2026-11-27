@@ -150,11 +150,71 @@ Their earlier work is kept in the records as Round 1, while the progress chart a
 
 ---
 
-## PART H — Teachers' daily monitoring
+## PART H — Teachers' checking progress & recognition (v1.3)
+
+**Who checks what:** a teacher is the **assigned checker** for the sections in their account (**Settings → Teacher accounts → Sections**). Accounts set to **ALL** (coordinator, ARAL facilitators) monitor everything and are not counted as assigned checkers. Sections with no checker are flagged **Unassigned**.
+
+- **✅ Checking** shows a progress bar of your sections' work that has been checked, plus an **Assigned to** column for each submission.
+- **🏅 Teachers** (open to every teacher) shows:
+  - **Your checking progress**: the % of your assigned sections' work that has been checked
+  - **Teachers' checking progress**: for each teacher, the % of assigned work checked, how many they checked themselves, personal comments written, median time from submission to checking, and their learners' completion
+  - **Checking assignments by section**: assigned teacher(s), % checked, work waiting, and the oldest unchecked item (red if over 3 days)
+- **Recognition awards** for the chosen period (this week, 30 days, 90 days, or school year), each with a printable **Certificate of Recognition** carrying the letterhead and the coordinator's and principal's signatures:
+  - **Most Productive Checker**: checked the most learners' work
+  - **Fastest Feedback**: shortest median time to check (at least 10 checks)
+  - **100% Checker**: checked all work in the assigned sections (at least 10)
+  - **Most Encouraging Teacher**: wrote the most personal comments
+  - **Most Engaged Sections**: highest learner completion in the assigned sections
+- **Print report** gives the Teachers' Checking Progress Report: per teacher, per section, and the awardees.
+
+A check is counted when a teacher saves feedback on a learner's work, scores a test, or accepts the suggested scores.
+
+**Two or more teachers in one section (v1.4):** add the same section to both teachers' accounts. Then go to **Settings → Splitting the checking** and choose how to divide that section's work:
+
+| Split | How it works |
+|---|---|
+| **By level** | Tick the levels each teacher checks, e.g. Teacher A: Beginner; Teacher B: Intermediate + Advanced. |
+| **By learner name** | Give each teacher a range of last names, e.g. A–M and N–Z. **Fill evenly** divides A–Z for you. |
+| **By day** | Teacher 1 checks odd days (1, 3, 5…) and Teacher 2 checks even days (2, 4, 6…). With 3 teachers it rotates every 3 days. **Rotate order** swaps who starts. Tests are shared in this mode. |
+| **Shared** | Both teachers see all of the section's work (the default). |
+
+Each teacher then has their **own queue** in ✅ Checking (**Assigned to me**; **All my sections** shows the whole section) and their **own progress %**. The Teachers tab shows each teacher's share, e.g. *Maria Santos: 84% (21/25) · Liza Garcia: 100% (15/15)*. The card also shows how many learners each teacher gets. Learners not covered by the split (e.g. a level nobody ticked) are shared by all of the section's teachers, so nothing is left unchecked.
+
+---
+
+## PART I — School years: keep every year's records (v1.5)
+
+Each school year has its own learners and records, and **nothing is deleted**.
+
+**At the end of the school year** (Program Coordinator): go to **Settings → School years → Start a new school year**.
+1. Type the new school year (e.g. *2027–2028*).
+2. Choose the learners for the new year:
+   - **Start with an empty list:** import the new list.
+   - **Keep Grade 11 learners as Grade 12:** their sections are cleared, so re-import to set them. Grade 12 learners are treated as graduated.
+   - **Keep all learners:** only their work is cleared.
+3. Confirm. The app then:
+   - saves a **complete copy** of the database (learners, daily work, test results, checking, levels, phone logins, lessons, settings) as **"PEARL Archive — SY 2026–2027"** in the Drive folder *PEARL App School Year Archives*
+   - **checks the copy row by row** before clearing anything; if the check fails, nothing is cleared
+   - starts the new year with no submissions, all tests closed, *Released up to Day* set to 1, and the same lessons, teacher accounts and settings
+
+**Reviewing a past year anytime:** use the **School year** menu at the top of the teacher sidebar, or **Settings → School years → View**. A yellow bar shows you are viewing an archived year.
+- Every tab works for that year: dashboard, progress chart, learners' work and recordings, tests, teachers' progress, security, and all reports with that year's letterhead.
+- Records can't be changed, but you **can still finish checking** last year's work.
+- **Sheet** opens the archive file in Google Sheets.
+
+**Nothing gets lost:**
+- Work a learner finished offline last year but uploads after the new year started goes into **last year's archive**, not the new year.
+- Learners' progress on their phones is kept separately for each school year, so returning learners start the new year fresh at Day 1.
+- Recordings are filed in Drive by school year: *PEARL App Audio Recordings → SY 2027–2028 → Beginner…*
+
+---
+
+## PART J — Teachers' daily monitoring
 
 | Tab | What you can do |
 |---|---|
 | **📊 Dashboard** | Completion %, average quiz, learners by level, completion per section, **WATCH: First to Submit** (per day), **Most Improved** (pre→post or quiz trend), no activity in 5+ days, needs support, ready for releveling |
+| **🏅 Teachers** | Assigned checkers, % checked per teacher and section, recognition awards and certificates. |
 | **🛡 Security** | Phone and login monitoring, shared phones, leaving-the-app counts. |
 | **✅ Checking** | Unchecked daily work and tests in one list, flagged items first. Accept the suggested scores in one tap. |
 | **🗓 Progress Chart** | The digital wall chart: quiz score, ✍ written and 🎙 audio for each day. Tap a name to open the learner's work, **play the recording**, and give **feedback** (accuracy, expression, pace, stars, comment). Learners see your comment. |
@@ -189,6 +249,9 @@ Every school uses **its own copy** of the database:
 - **400 learners at once:** Google limits how many requests run at the same time. When it's busy, the app retries by itself, with random waits, until everything uploads.
 - **Learners' PINs** are stored scrambled (hashed), never as plain text. Only signed-in teachers can play recordings.
 - **WATCH times** come from the moment the learner finished on their phone, so working offline still counts. ⚠ marks a phone whose clock looks wrong.
+- **Updating to v1.5:** paste the new `Code.gs`, deploy a **New version**, and upload all app files to GitHub. The first time you start a new school year, Google may ask you to allow the script to create files in Drive (for the archive copy). Click **Allow**.
+- **Updating to v1.4:** paste the new `Code.gs`, deploy a **New version**, and upload all app files to GitHub.
+- **Updating to v1.3:** paste the new `Code.gs`, deploy a **New version**, and upload all app files to GitHub. Work checked before v1.3 is credited to the teacher by name.
 - **Updating to v1.2:** paste the new `Code.gs`, then **Deploy → Manage deployments → ✏️ Edit → Version: New version → Deploy**, and upload all app files to GitHub. New columns (Device, Cycle) and a **Logins** sheet are added automatically. Each learner's phone is registered at their next login.
 - **Updating from v1.0 to v1.1:** paste the new `Code.gs` over the old one, then do **Deploy → Manage deployments → ✏️ Edit → Version: New version → Deploy**, and upload the new app files to GitHub. The new *AutoCheck* column is added to the Daily sheet automatically.
 - **Updating Code.gs later:** go to **Deploy → Manage deployments → ✏️ Edit → Version: New version → Deploy**. The URL stays the same.
@@ -207,4 +270,4 @@ Every school uses **its own copy** of the database:
 
 ---
 
-*PEARL App v1.2.0 · Developed by Joy P. Bacala, Samal Senior High School · For Samal Senior High School and any school implementing the PEARL Program.*
+*PEARL App v1.5.0 · Developed by Joy P. Bacala, Samal Senior High School · For Samal Senior High School and any school implementing the PEARL Program.*

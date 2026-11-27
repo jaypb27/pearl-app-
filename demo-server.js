@@ -8,7 +8,7 @@
  * Deploy: Deploy > New deployment > Web app > Execute as: Me > Who has access: Anyone
  */
 
-var APP_VERSION = '1.2.0';
+var APP_VERSION = '1.5.0';
 var CHUNK = 45000; // safe size per cell (Sheets limit is 50,000 chars)
 
 var SHEETS = {
@@ -49,19 +49,26 @@ function handle_(req) {
     ensureSheets_();
     var a = req.action;
     var pub = { info: info_, setup: setup_, login: login_, pull: pull_, submitDaily: submitDaily_, submitResult: submitResult_, myProgress: myProgress_, changePin: changePin_, board: board_, bindDevice: bindDevice_, logEvents: logEvents_ };
-    if (pub[a]) return pub[a](req);
+    if (pub[a] && !req.sy) return pub[a](req);
     var user = auth_(req.token);
     if (!user) return { ok: false, error: 'Your session expired. Please log in again.', auth: false };
+    if (req.sy) { // reading a past school year (read-only, except late checking)
+      var arc = archiveOf_('id', req.sy);
+      if (!arc) return { ok: false, error: 'That school year archive was not found.' };
+      var ro = { pull: pull_, dashboard: dashboard_, studentDetail: studentDetail_, getAudio: getAudio_, teacherStats: teacherStats_, security: security_, grade: grade_, gradeMany: gradeMany_ };
+      if (!ro[a]) return { ok: false, error: 'SY ' + arc.sy + ' is archived. Its records can be viewed and checked, but not changed. Switch to the current school year to make changes.' };
+      return inYear_(arc, function () { var r = ro[a](req, user); if (r && a === 'pull') { r.archive = arc; r.stamps = {}; } return r; });
+    }
     var t = {
       dashboard: dashboard_, studentDetail: studentDetail_, getAudio: getAudio_, grade: grade_, gradeMany: gradeMany_,
       saveSettings: saveSettings_, saveStudents: saveStudents_, deleteStudents: deleteStudents_, resetPins: resetPins_,
       setLevels: setLevels_, saveLessons: saveLessons_, deleteLessons: deleteLessons_,
       saveAssessment: saveAssessment_, deleteAssessment: deleteAssessment_,
       saveUser: saveUser_, deleteUser: deleteUser_, changePassword: changePassword_,
-      resetDevices: resetDevices_, security: security_, setShared: setShared_
+      resetDevices: resetDevices_, security: security_, setShared: setShared_, teacherStats: teacherStats_, closeYear: closeYear_
     };
     if (!t[a]) return { ok: false, error: 'Unknown action: ' + a };
-    var admOnly = { saveSettings: 1, saveUser: 1, deleteUser: 1, deleteLessons: 1 };
+    var admOnly = { saveSettings: 1, saveUser: 1, deleteUser: 1, deleteLessons: 1, closeYear: 1 };
     if (admOnly[a] && user.role !== 'admin') return { ok: false, error: 'Only the Program Coordinator (admin) can do this.' };
     return t[a](req, user);
   } catch (err) {
@@ -73,7 +80,14 @@ function handle_(req) {
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
-function ss_() { return SpreadsheetApp.getActiveSpreadsheet(); }
+var CUR_SS = null; // set while reading an archived school year
+function ss_() { return CUR_SS || SpreadsheetApp.getActiveSpreadsheet(); }
+function archiveOf_(key, val) { return (settingsObj_().archives || []).filter(function (a) { return a[key] === val; })[0]; }
+function inYear_(archive, fn) {
+  if (!archive) return fn();
+  CUR_SS = SpreadsheetApp.openById(archive.id);
+  try { return fn(); } finally { CUR_SS = null; }
+}
 function props_() { return PropertiesService.getScriptProperties(); }
 function now_() { return new Date().toISOString(); }
 
@@ -244,7 +258,7 @@ function pull_(req) {
   if (have.assessments !== st.assessments) {
     res.assessments = rows_('Assessments').filter(function (r) { return r[0]; }).map(function (r) { var a = unpack_([r[5], r[6], r[7], r[8]]); a.open = r[3] === true || String(r[3]) === 'true'; return a; });
   }
-  if (user && user.role === 'admin' && have.users !== st.users) {
+  if (user && have.users !== st.users) {
     res.users = rows_('Users').map(function (r) { return { username: r[0], name: r[1], role: r[2], sections: String(r[3]), active: !(r[5] === false || String(r[5]) === 'false') }; });
   }
   if (user) res.user = user;
@@ -256,18 +270,36 @@ function saveAudio_(audio, s, label) {
   var p = props_(), fid = p.getProperty('AUDIO_FOLDER'), root;
   try { root = fid ? DriveApp.getFolderById(fid) : null; } catch (e) { root = null; }
   if (!root) { root = DriveApp.createFolder('PEARL App Audio Recordings'); p.setProperty('AUDIO_FOLDER', root.getId()); }
-  var sub, it = root.getFoldersByName(s.level || 'Unassigned');
-  sub = it.hasNext() ? it.next() : root.createFolder(s.level || 'Unassigned');
+  var syName = 'SY ' + String(settingsObj_().schoolYear || 'current').replace(/[\/\\]/g, '-');
+  var yit = root.getFoldersByName(syName), yr = yit.hasNext() ? yit.next() : root.createFolder(syName);
+  var sub, it = yr.getFoldersByName(s.level || 'Unassigned');
+  sub = it.hasNext() ? it.next() : yr.createFolder(s.level || 'Unassigned');
   var ext = /mp4|m4a|aac/.test(audio.mime || '') ? 'm4a' : (/ogg/.test(audio.mime || '') ? 'ogg' : 'webm');
   var name = label + '_' + String(s.last).replace(/\s+/g, '') + '_' + String(s.first).replace(/\s+/g, '') + '_' + s.lrn + '.' + ext;
   var f = sub.createFile(Utilities.newBlob(Utilities.base64Decode(audio.b64), audio.mime || 'audio/webm', name));
   return { id: f.getId(), url: f.getUrl() };
 }
 
+/* work done offline last school year but uploaded after the new year started goes into that year's archive */
+function yearOfRec_(rec) {
+  var cur = settingsObj_();
+  if (!rec || rec.syId == null || String(rec.syId) === String(cur.syId || '')) return null;
+  return archiveOf_('syId', String(rec.syId)) || null;
+}
 function submitDaily_(req) {
+  var arc = yearOfRec_(req.rec);
+  if (arc) return inYear_(arc, function () { return submitDailyIn_(req, true); });
+  return submitDailyIn_(req, false);
+}
+function submitResult_(req) {
+  var arc = yearOfRec_(req.rec);
+  if (arc) return inYear_(arc, function () { return submitResultIn_(req, true); });
+  return submitResultIn_(req, false);
+}
+function submitDailyIn_(req, late) {
   var s = checkStudent_(req.lrn, req.pinHash);
   var r = req.rec || {};
-  deviceSeen_(s, r.device, 'submit');
+  if (!late) deviceSeen_(s, r.device, 'submit');
   if (hasId_('Daily', r.id)) return { ok: true, id: r.id, duplicate: true };
   var label = (r.level || s.level) + '_Day' + ('0' + r.day).slice(-2);
   var au = saveAudio_(req.audio, s, label);
@@ -282,10 +314,10 @@ function submitDaily_(req) {
   return { ok: true, id: r.id, syncedAt: syncedAt };
 }
 
-function submitResult_(req) {
+function submitResultIn_(req, late) {
   var s = checkStudent_(req.lrn, req.pinHash);
   var r = req.rec || {};
-  deviceSeen_(s, r.device, 'test');
+  if (!late) deviceSeen_(s, r.device, 'test');
   if (hasId_('Results', r.id)) return { ok: true, id: r.id, duplicate: true };
   var audios = {};
   (req.audios || []).forEach(function (a) { var x = saveAudio_(a, s, 'Assessment_' + r.assessmentId + '_' + a.itemId); audios[a.itemId] = x; });
@@ -310,7 +342,12 @@ function changePin_(req) {
 
 function gradesMap_() {
   var m = {};
-  rows_('Grades').forEach(function (r) { try { m[r[0]] = { by: r[2], at: r[3], g: JSON.parse(r[4]) }; } catch (e) { } });
+  rows_('Grades').forEach(function (r) {
+    try {
+      var g = JSON.parse(r[4]), prev = m[r[0]];
+      m[r[0]] = { by: r[2], at: r[3], u: g._u || '', g: g, firstAt: prev ? prev.firstAt : r[3], firstBy: prev ? prev.firstBy : (g._u || r[2]) };
+    } catch (e) { }
+  });
   return m;
 }
 
@@ -327,11 +364,11 @@ function dailySummary_(filterFn) {
     if (seen[k]) return; seen[k] = 1;
     if (filterFn && !filterFn(r)) return;
     var gr = g[r[0]];
-    out.push([r[0], String(r[1]), r[4], r[5], r[6], r[8], r[9], r[10], r[11], r[13], r[14], r[18], r[19], r[3], gr ? gr.g : null, r[15] ? 1 : 0, r[12], auto[ri] ? String(auto[ri][0] || '') : '', cyc]);
+    out.push([r[0], String(r[1]), r[4], r[5], r[6], r[8], r[9], r[10], r[11], r[13], r[14], r[18], r[19], r[3], gr ? gr.g : null, r[15] ? 1 : 0, r[12], auto[ri] ? String(auto[ri][0] || '') : '', cyc, gr ? gr.firstBy : '', gr ? gr.firstAt : '']);
   });
   return out;
 }
-var DAILY_FIELDS = ['id', 'lrn', 'level', 'day', 'lessonId', 'score', 'total', 'written', 'words', 'audioStatus', 'audioSec', 'completedAt', 'syncedAt', 'section', 'grade', 'hasAudio', 'vocabUsed', 'auto', 'cycle'];
+var DAILY_FIELDS = ['id', 'lrn', 'level', 'day', 'lessonId', 'score', 'total', 'written', 'words', 'audioStatus', 'audioSec', 'completedAt', 'syncedAt', 'section', 'grade', 'hasAudio', 'vocabUsed', 'auto', 'cycle', 'gradedBy', 'gradedAt'];
 
 function resultsSummary_(filterFn) {
   var seen = {}, out = [], g = gradesMap_();
@@ -339,11 +376,11 @@ function resultsSummary_(filterFn) {
     if (!r[0] || seen[r[0]]) return; seen[r[0]] = 1;
     if (filterFn && !filterFn(r)) return;
     var gr = g[r[0]];
-    out.push([r[0], String(r[1]), r[4], r[5], r[7], r[8], r[9], r[10], r[11], r[3], gr ? gr.g : null]);
+    out.push([r[0], String(r[1]), r[4], r[5], r[7], r[8], r[9], r[10], r[11], r[3], gr ? gr.g : null, gr ? gr.firstBy : '', gr ? gr.firstAt : '']);
   });
   return out;
 }
-var RESULT_FIELDS = ['id', 'lrn', 'level', 'assessmentId', 'type', 'autoScore', 'autoTotal', 'manualPending', 'completedAt', 'section', 'grade'];
+var RESULT_FIELDS = ['id', 'lrn', 'level', 'assessmentId', 'type', 'autoScore', 'autoTotal', 'manualPending', 'completedAt', 'section', 'grade', 'gradedBy', 'gradedAt'];
 
 /* WATCH board + my progress for students (no auth needed for the board: names + times only) */
 function board_(req) {
@@ -362,6 +399,51 @@ function myProgress_(req) {
   var res = rows_('Results').filter(function (r) { return String(r[1]) === s.lrn; })
     .map(function (r) { return { id: r[0], assessmentId: r[5], autoScore: r[8], autoTotal: r[9], manualPending: r[10], completedAt: r[11], grade: g[r[0]] ? g[r[0]].g : null }; });
   return { ok: true, daily: daily, results: res, student: { level: s.level, section: s.section, cycle: s.cycle } };
+}
+
+/* ------------------------------------------------------------------ */
+/* School years: close the year into a verified archive copy, start fresh */
+/* ------------------------------------------------------------------ */
+function closeYear_(req, user) {
+  var newSy = String(req.newSy || '').trim();
+  if (!newSy) return { ok: false, error: 'Please type the new school year, e.g. 2027–2028.' };
+  return withLock_(function () {
+    var ss = SpreadsheetApp.getActiveSpreadsheet(), cur = settingsObj_(), oldSy = String(cur.schoolYear || 'previous');
+    if ((cur.archives || []).some(function (a) { return a.sy === oldSy; }) && !req.force) return { ok: false, error: 'SY ' + oldSy + ' was already archived. Change the current school year name first.' };
+    // 1) full copy of the database
+    var copy = ss.copy('PEARL Archive — SY ' + oldSy + ' — ' + (cur.schoolName || 'School'));
+    var file = DriveApp.getFileById(copy.getId());
+    try {
+      var p = props_(), fid = p.getProperty('ARCHIVE_FOLDER'), folder = null;
+      try { folder = fid ? DriveApp.getFolderById(fid) : null; } catch (e) { folder = null; }
+      if (!folder) { folder = DriveApp.createFolder('PEARL App School Year Archives'); p.setProperty('ARCHIVE_FOLDER', folder.getId()); }
+      file.moveTo(folder);
+    } catch (e) { }
+    // 2) verify the copy before clearing anything
+    var keep = ['Students', 'Daily', 'Results', 'Grades', 'LevelHistory', 'Logins', 'Lessons', 'Assessments', 'Users', 'Settings'];
+    keep.forEach(function (n) {
+      var a = ss.getSheetByName(n), b = copy.getSheetByName(n);
+      if (a && (!b || b.getLastRow() !== a.getLastRow())) throw new Error('Archive check failed for "' + n + '". Nothing was cleared. Please try again.');
+    });
+    var learners = Math.max(0, ss.getSheetByName('Students').getLastRow() - 1), subs = Math.max(0, ss.getSheetByName('Daily').getLastRow() - 1);
+    var arc = { sy: oldSy, syId: String(cur.syId || ''), id: copy.getId(), url: copy.getUrl(), closedAt: now_(), by: user.name, learners: learners, submissions: subs, tests: Math.max(0, ss.getSheetByName('Results').getLastRow() - 1) };
+    // 3) start the new year
+    ['Daily', 'Results', 'Grades', 'LevelHistory', 'Logins'].forEach(function (n) { writeAll_(n, []); });
+    var studs = rows_('Students').filter(function (r) { return r[0] !== ''; }), kept = 0;
+    if (req.keep === 'g11') {
+      studs = studs.filter(function (r) { return /^11/.test(String(r[5])); }).map(function (r) { r[5] = '12'; r[6] = ''; r[10] = now_(); r[11] = now_(); r[14] = 0; r[15] = ''; return r; });
+      kept = studs.length;
+    } else if (req.keep === 'all') { studs.forEach(function (r) { r[14] = 0; r[15] = ''; }); kept = studs.length; }
+    else studs = [];
+    writeAll_('Students', studs);
+    var as = rows_('Assessments').filter(function (r) { return r[0]; }); as.forEach(function (r) { r[3] = false; }); writeAll_('Assessments', as);
+    var st = settingsObj_();
+    st.archives = (st.archives || []).concat([arc]);
+    st.schoolYear = newSy; st.syId = Utilities.getUuid().slice(0, 8); st.releasedDay = 1; st.sharedDevices = st.sharedDevices || [];
+    writeAll_('Settings', Object.keys(st).map(function (k) { return [k, JSON.stringify(st[k])]; }));
+    ['settings', 'students', 'assessments'].forEach(stamp_);
+    return { ok: true, archive: arc, kept: kept, syId: st.syId };
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -501,12 +583,79 @@ function similarity_(a, b) {
   return ka.filter(function (k) { return B[k]; }).length / Math.min(ka.length, kb.length);
 }
 
+/* When 2+ teachers share a section, the coordinator can split the checking:
+ * shared (both), by level, by learner's last name (letter ranges), or by day (teacher 1 odd days, teacher 2 even days, ...) */
+function pickCheckers_(cfg, tlist, learner, level, day) {
+  if (!tlist || tlist.length < 2 || !cfg || !cfg.mode || cfg.mode === 'shared') return tlist || [];
+  var map = cfg.map || {}, out = [];
+  if (cfg.mode === 'level') out = tlist.filter(function (u) { return (map[u] || []).indexOf(level) >= 0; });
+  else if (cfg.mode === 'name') {
+    var ch = String(learner && learner.last || '').trim().charAt(0).toUpperCase();
+    out = tlist.filter(function (u) { var rg = String(map[u] || '').toUpperCase().replace(/[^A-Z-]/g, '').split('-'); return rg[0] && ch >= rg[0] && ch <= (rg[1] || rg[0]); });
+  } else if (cfg.mode === 'day') {
+    if (!day) return tlist;
+    var order = (cfg.order || []).filter(function (u) { return tlist.indexOf(u) >= 0; });
+    tlist.forEach(function (u) { if (order.indexOf(u) < 0) order.push(u); });
+    out = [order[(Number(day) - 1) % order.length]];
+  }
+  return out.length ? out : tlist; // anything not covered by the split goes to all assigned teachers
+}
+
+/* Checking accountability: who is assigned to check each section, how much is checked, and who checks the most.
+ * A teacher is assigned to the sections listed in their account (accounts with ALL are coordinators/monitors). */
+function teacherStats_(req, user) {
+  var days = Number(req.days) || 30, since = new Date(Date.now() - days * 864e5).toISOString();
+  var sm = studentMap_(), st = settingsObj_(), released = Number(st.releasedDay) || 40;
+  var users = rows_('Users').filter(function (r) { return r[0] && !(r[5] === false || String(r[5]) === 'false'); })
+    .map(function (r) { return { username: String(r[0]), name: r[1], role: r[2], sections: String(r[3] || 'ALL').split(',').map(function (x) { return x.trim(); }).filter(Boolean) }; });
+  var byName = {}; users.forEach(function (u) { byName[String(u.name).toLowerCase()] = u.username; byName[u.username.toLowerCase()] = u.username; });
+  var who = function (x) { return x ? (byName[String(x).toLowerCase()] || String(x)) : ''; };
+  var secT = {}; // section -> assigned usernames
+  users.forEach(function (u) { if (u.sections.some(function (s) { return /^all$/i.test(s); })) return; u.sections.forEach(function (s) { (secT[s.toLowerCase()] = secT[s.toLowerCase()] || []).push(u.username); }); });
+  Object.keys(secT).forEach(function (k) { secT[k].sort(); });
+  var split = st.checkSplit || {};
+  var assignees = function (s, level, day) { var k = String(s.section).toLowerCase(); return pickCheckers_(split[k], secT[k] || [], s, level, day); };
+  var items = [];
+  dailySummary_().forEach(function (r) { items.push({ id: r[0], lrn: r[1], kind: 'daily', level: r[2], day: r[3], at: r[11], by: who(r[19]), gat: r[20], checked: !!r[14], comment: r[14] && r[14].comment && !r[14].auto ? 1 : 0, auto: r[14] && r[14].auto ? 1 : 0 }); });
+  resultsSummary_().forEach(function (r) { if (Number(r[7]) > 0) items.push({ id: r[0], lrn: r[1], kind: 'test', level: r[2], day: 0, at: r[8], by: who(r[11]), gat: r[12], checked: !!r[10], comment: r[10] && r[10].comment ? 1 : 0 }); });
+  var sec = {}, T = {};
+  users.forEach(function (u) { T[u.username] = { username: u.username, name: u.name, role: u.role, sections: u.sections, assigned: 0, assignedChecked: 0, checks: 0, comments: 0, autoAccepted: 0, hours: [], last: '', learners: 0, doneDays: 0 }; });
+  items.forEach(function (it) {
+    var s = sm[it.lrn]; if (!s) return;
+    var key = String(s.section).toLowerCase(), inP = String(it.at) >= since;
+    var S = sec[key] = sec[key] || { section: s.section, total: 0, checked: 0, pending: 0, oldest: '', per: {} };
+    var mine = assignees(s, it.level || s.level, it.day);
+    if (inP) { S.total++; if (it.checked) S.checked++; mine.forEach(function (u) { var q = S.per[u] = S.per[u] || { total: 0, checked: 0 }; q.total++; if (it.checked) q.checked++; }); }
+    if (!it.checked) { S.pending++; if (!S.oldest || it.at < S.oldest) S.oldest = it.at; }
+    mine.forEach(function (u) { var t = T[u]; if (t && inP) { t.assigned++; if (it.checked) t.assignedChecked++; } });
+    if (it.checked && it.by && String(it.gat) >= since) {
+      var t = T[it.by] || (T[it.by] = { username: it.by, name: it.by, role: '', sections: [], assigned: 0, assignedChecked: 0, checks: 0, comments: 0, autoAccepted: 0, hours: [], last: '', learners: 0, doneDays: 0 });
+      t.checks++; t.comments += it.comment; t.autoAccepted += it.auto || 0;
+      var h = (new Date(it.gat) - new Date(it.at)) / 36e5; if (h >= 0 && h < 24 * 60) t.hours.push(h);
+      if (String(it.gat) > t.last) t.last = it.gat;
+    }
+  });
+  // learner engagement in each teacher's sections (pearls done in the current round)
+  var done = {}; dailySummary_().forEach(function (r) { var s = sm[r[1]]; if (s && (Number(r[18]) || 0) === s.cycle) done[r[1]] = (done[r[1]] || 0) + 1; });
+  Object.keys(sm).forEach(function (l) { var s = sm[l]; if (!s.active) return; assignees(s, s.level, 0).forEach(function (u) { var t = T[u]; if (t) { t.learners++; t.doneDays += Math.min(released, done[l] || 0); } }); });
+  var teachers = Object.keys(T).map(function (k) {
+    var t = T[k], hs = t.hours.sort(function (a, b) { return a - b; });
+    t.median = hs.length ? Math.round(hs[Math.floor(hs.length / 2)] * 10) / 10 : null; delete t.hours;
+    t.pct = t.assigned ? Math.round(t.assignedChecked / t.assigned * 100) : null;
+    t.engagement = t.learners ? Math.round(t.doneDays / (t.learners * released) * 100) : null;
+    return t;
+  });
+  var sections = {}; Object.keys(sm).forEach(function (l) { var s = sm[l]; if (!s.active) return; var k = String(s.section).toLowerCase(); sections[k] = sections[k] || { section: s.section, learners: 0 }; sections[k].learners++; });
+  var secList = Object.keys(sections).map(function (k) { var x = sec[k] || { total: 0, checked: 0, pending: 0, oldest: '' }; return { section: sections[k].section, learners: sections[k].learners, teachers: (secT[k] || []).map(function (u) { return T[u] ? T[u].name : u; }), split: (split[k] && (secT[k] || []).length > 1) ? split[k].mode : 'shared', per: Object.keys(x.per || {}).map(function (u) { var q = x.per[u]; return { name: T[u] ? T[u].name : u, total: q.total, checked: q.checked, pct: q.total ? Math.round(q.checked / q.total * 100) : null }; }), total: x.total, checked: x.checked, pending: x.pending, oldest: x.oldest, pct: x.total ? Math.round(x.checked / x.total * 100) : null }; });
+  return { ok: true, days: days, teachers: teachers, sections: secList, me: user.username };
+}
+
 /* accept many suggested grades at once: [{recId, kind, grade}] */
 function gradeMany_(req, user) {
   var list = req.items || [];
   withLock_(function () {
     var sh = sheet_('Grades'), at = now_();
-    var rows = list.map(function (x) { return [x.recId, x.kind || 'daily', user.name || user.username, at, JSON.stringify(x.grade || {})]; });
+    var rows = list.map(function (x) { var g = x.grade || {}; g._u = user.username; return [x.recId, x.kind || 'daily', user.name || user.username, at, JSON.stringify(g)]; });
     if (rows.length) sh.getRange(sh.getLastRow() + 1, 1, rows.length, 5).setValues(rows);
   });
   return { ok: true, count: list.length };
@@ -520,7 +669,8 @@ function getAudio_(req, user) {
 
 /* Teacher feedback on daily task, or manual scores for assessment items */
 function grade_(req, user) {
-  withLock_(function () { append_('Grades', [req.recId, req.kind || 'daily', user.name || user.username, now_(), JSON.stringify(req.grade || {})]); });
+  var g = req.grade || {}; g._u = user.username;
+  withLock_(function () { append_('Grades', [req.recId, req.kind || 'daily', user.name || user.username, now_(), JSON.stringify(g)]); });
   return { ok: true };
 }
 

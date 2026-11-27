@@ -1,5 +1,5 @@
 /* PEARL App service worker: keeps the app and all lessons available offline. */
-var CACHE = 'pearl-app-v1.2.0';
+var CACHE = 'pearl-app-v1.5.0';
 var CORE = ['./', 'index.html', 'config.js', 'default-content.js', 'css/app.css', 'js/core.js', 'js/checker.js', 'js/student.js', 'js/teacher.js', 'js/reports.js', 'js/main.js',
   'gas-shim.js', 'demo-server.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/pearl-logo.png'];
 self.addEventListener('install', function (e) {
