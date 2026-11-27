@@ -3,5 +3,5 @@
  * Other schools: deploy your own copy of Code.gs and put YOUR URL here (or paste it in the app's connection screen).
  */
 window.PEARL_CONFIG = {
-  apiUrl: 'https://script.google.com/macros/s/AKfycbz9R1c4PRqJ8ncj1oKBrzCCPKBwJ-s0Pl8yUFo_ka72CZL6u3YFoOI2DL7f7uvj8td4/exec'
+  apiUrl: 'https://script.google.com/macros/s/AKfycbyw3jgxQuuJqUVZR_W8REVEtpVwE8ayeP3nI3N99zGQgtJHk32eOEaJ5K2DVuyKBfO5/exec'
 };
